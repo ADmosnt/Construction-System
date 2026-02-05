@@ -1,0 +1,874 @@
+// src/renderer/src/routes/ProyectoDetallePage.tsx
+
+import { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import Header from '../components/layout/Header';
+import Button from '../components/ui/Button';
+import Input from '../components/ui/Input';
+import Modal from '../components/ui/Modal';
+import { db } from '../lib/database';
+import type { Proyecto, Actividad, ResultadoSimulacion, MaterialActividad, Material } from '../types';
+
+export default function ProyectoDetallePage() {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const [proyecto, setProyecto] = useState<Proyecto | null>(null);
+  const [actividades, setActividades] = useState<Actividad[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showActividadModal, setShowActividadModal] = useState(false);
+  const [editingActividad, setEditingActividad] = useState<Actividad | null>(null);
+  
+  // Materiales de actividad
+  const [showMaterialesModal, setShowMaterialesModal] = useState(false);
+  const [selectedActividad, setSelectedActividad] = useState<Actividad | null>(null);
+  const [materialesActividad, setMaterialesActividad] = useState<MaterialActividad[]>([]);
+  const [todosMateriales, setTodosMateriales] = useState<Material[]>([]);
+  const [showAddMaterialModal, setShowAddMaterialModal] = useState(false);
+  
+  // Simulador
+  const [showSimulador, setShowSimulador] = useState(false);
+  const [avanceSimulado, setAvanceSimulado] = useState(0);
+  const [simulacion, setSimulacion] = useState<ResultadoSimulacion | null>(null);
+  const [simulando, setSimulando] = useState(false);
+
+  useEffect(() => {
+    if (id) {
+      loadProyecto();
+      loadActividades();
+      loadTodosMateriales();
+    }
+  }, [id]);
+
+  const loadProyecto = async () => {
+    try {
+      const data = await db.proyectos.getById(Number(id));
+      setProyecto(data);
+      setAvanceSimulado(data?.avance_actual || 0);
+    } catch (error) {
+      console.error('Error loading proyecto:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadActividades = async () => {
+    try {
+      const data = await db.actividades.getByProyecto(Number(id));
+      setActividades(data);
+    } catch (error) {
+      console.error('Error loading actividades:', error);
+    }
+  };
+
+  const loadTodosMateriales = async () => {
+    try {
+      const data = await db.materiales.getAll();
+      setTodosMateriales(data);
+    } catch (error) {
+      console.error('Error loading materiales:', error);
+    }
+  };
+
+  const handleVerMateriales = async (actividad: Actividad) => {
+    try {
+      const mats = await db.actividades.getMateriales(actividad.id);
+      setMaterialesActividad(mats);
+      setSelectedActividad(actividad);
+      setShowMaterialesModal(true);
+    } catch (error) {
+      console.error('Error loading materiales:', error);
+    }
+  };
+
+  const handleAddMaterial = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!selectedActividad) return;
+
+    const formData = new FormData(e.currentTarget);
+    try {
+      await db.actividades.addMaterial({
+        actividad_id: selectedActividad.id,
+        material_id: parseInt(formData.get('material_id') as string),
+        cantidad_estimada: parseFloat(formData.get('cantidad_estimada') as string),
+        cantidad_consumida: 0
+      });
+      
+      const mats = await db.actividades.getMateriales(selectedActividad.id);
+      setMaterialesActividad(mats);
+      setShowAddMaterialModal(false);
+    } catch (error: any) {
+      console.error('Error adding material:', error);
+      alert(error.message || 'Error al agregar material');
+    }
+  };
+
+  const handleUpdateMaterial = async (id: number, cantidadEstimada: number, cantidadConsumida: number) => {
+    try {
+      await db.actividades.updateMaterial(id, {
+        cantidad_estimada: cantidadEstimada,
+        cantidad_consumida: cantidadConsumida
+      });
+      
+      if (selectedActividad) {
+        const mats = await db.actividades.getMateriales(selectedActividad.id);
+        setMaterialesActividad(mats);
+      }
+    } catch (error) {
+      console.error('Error updating material:', error);
+    }
+  };
+
+  const handleRemoveMaterial = async (id: number) => {
+    if (!confirm('¿Eliminar este material de la actividad?')) return;
+    
+    try {
+      await db.actividades.removeMaterial(id);
+      
+      if (selectedActividad) {
+        const mats = await db.actividades.getMateriales(selectedActividad.id);
+        setMaterialesActividad(mats);
+      }
+    } catch (error) {
+      console.error('Error removing material:', error);
+    }
+  };
+
+  const handleUpdateAvance = async (actividadId: number, nuevoAvance: number) => {
+    try {
+      await db.actividades.update(actividadId, { avance_real: nuevoAvance });
+      await loadActividades();
+      
+      // Recalcular avance del proyecto
+      const acts = await db.actividades.getByProyecto(Number(id));
+      const avancePromedio = acts.reduce((sum, act) => sum + act.avance_real, 0) / acts.length;
+      await db.proyectos.update(Number(id), { avance_actual: Math.round(avancePromedio * 10) / 10 });
+      await loadProyecto();
+      
+      // GENERAR ALERTAS AUTOMÁTICAMENTE
+      await db.alertas.generar(Number(id));
+    } catch (error) {
+      console.error('Error updating avance:', error);
+    }
+  };
+
+  const handleSaveActividad = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const formData = new FormData(e.currentTarget);
+
+    const actividadData = {
+      proyecto_id: Number(id),
+      nombre: formData.get('nombre') as string,
+      descripcion: formData.get('descripcion') as string,
+      orden: parseInt(formData.get('orden') as string),
+      avance_planificado: parseFloat(formData.get('avance_planificado') as string) || 0,
+      avance_real: parseFloat(formData.get('avance_real') as string) || 0,
+      fecha_inicio_planificada: formData.get('fecha_inicio_planificada') as string || null,
+      fecha_fin_planificada: formData.get('fecha_fin_planificada') as string || null
+    };
+
+    try {
+      if (editingActividad) {
+        await db.actividades.update(editingActividad.id, actividadData);
+      } else {
+        await db.actividades.create(actividadData);
+      }
+      await loadActividades();
+      setShowActividadModal(false);
+      setEditingActividad(null);
+    } catch (error) {
+      console.error('Error saving actividad:', error);
+      alert('Error al guardar la actividad');
+    }
+  };
+
+  const handleSimular = async () => {
+    if (!proyecto || avanceSimulado <= proyecto.avance_actual) {
+      alert('El avance simulado debe ser mayor al avance actual');
+      return;
+    }
+
+    try {
+      setSimulando(true);
+      const resultado = await db.simulador.simular(Number(id), avanceSimulado);
+      setSimulacion(resultado);
+    } catch (error: any) {
+      console.error('Error simulando:', error);
+      alert('Error al simular: ' + error.message);
+    } finally {
+      setSimulando(false);
+    }
+  };
+
+  const getColorEstado = (estado: string) => {
+    const colores = {
+      'critico': 'bg-red-100 text-red-700 border-red-300',
+      'bajo': 'bg-orange-100 text-orange-700 border-orange-300',
+      'alerta': 'bg-yellow-100 text-yellow-700 border-yellow-300',
+      'ok': 'bg-green-100 text-green-700 border-green-300'
+    };
+    return colores[estado as keyof typeof colores] || colores.ok;
+  };
+
+  // Obtener materiales disponibles (que no están ya asignados a la actividad)
+  const materialesDisponibles = todosMateriales.filter(
+    m => !materialesActividad.some(ma => ma.material_id === m.id)
+  );
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Cargando proyecto...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!proyecto) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center">
+          <p className="text-xl text-gray-600 mb-4">Proyecto no encontrado</p>
+          <Button onClick={() => navigate('/proyectos')}>Volver a Proyectos</Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <Header 
+        title={proyecto.nombre}
+        subtitle={proyecto.descripcion || ''}
+        action={
+          <div className="flex gap-2">
+            <Button variant="secondary" onClick={() => setShowSimulador(!showSimulador)}>
+               {showSimulador ? 'Ocultar' : 'Mostrar'} Simulador
+            </Button>
+            <Button variant="ghost" onClick={() => navigate('/proyectos')}>
+              ← Volver
+            </Button>
+          </div>
+        }
+      />
+
+      <div className="p-8">
+        {/* Información General */}
+        <div className="bg-white rounded-lg shadow p-6 mb-6">
+          <h2 className="text-lg font-semibold mb-4">Información del Proyecto</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div>
+              <p className="text-sm text-gray-500">Estado</p>
+              <span className={`
+                inline-block mt-1 px-3 py-1 rounded-full text-sm font-semibold
+                ${proyecto.estado === 'activo' ? 'bg-green-100 text-green-700' : ''}
+                ${proyecto.estado === 'pausado' ? 'bg-yellow-100 text-yellow-700' : ''}
+                ${proyecto.estado === 'finalizado' ? 'bg-gray-100 text-gray-700' : ''}
+              `}>
+                {proyecto.estado.toUpperCase()}
+              </span>
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">Ubicación</p>
+              <p className="font-medium mt-1">📍 {proyecto.ubicacion}</p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">Presupuesto</p>
+              <p className="font-medium mt-1">${proyecto.presupuesto_total.toLocaleString()}</p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">Fecha Inicio</p>
+              <p className="font-medium mt-1">{new Date(proyecto.fecha_inicio).toLocaleDateString()}</p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">Fecha Fin Estimada</p>
+              <p className="font-medium mt-1">{new Date(proyecto.fecha_fin_estimada).toLocaleDateString()}</p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">Avance General</p>
+              <p className="font-medium mt-1 text-2xl">{proyecto.avance_actual}%</p>
+            </div>
+          </div>
+
+          {/* Barra de progreso general */}
+          <div className="mt-6">
+            <div className="flex items-center justify-between text-sm mb-2">
+              <span className="text-gray-600 font-medium">Progreso General</span>
+              <span className="font-semibold">{proyecto.avance_actual}%</span>
+            </div>
+            <div className="w-full bg-gray-200 rounded-full h-4">
+              <div 
+                className={`h-4 rounded-full transition-all ${
+                  proyecto.avance_actual < 40 ? 'bg-blue-500' : 
+                  proyecto.avance_actual < 75 ? 'bg-yellow-500' : 'bg-green-500'
+                }`}
+                style={{ width: `${proyecto.avance_actual}%` }}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* SIMULADOR */}
+        {showSimulador && (
+          <div className="bg-gradient-to-br from-purple-50 to-blue-50 border-2 border-purple-200 rounded-lg shadow-lg p-6 mb-6">
+            <div className="flex items-center gap-2 mb-4">
+              <div>
+                <h2 className="text-xl font-bold text-purple-900">Simulador de Consumo Predictivo</h2>
+                <p className="text-sm text-purple-700">Proyecta el impacto en el inventario según el avance del proyecto</p>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-lg p-6 mb-4">
+              <div className="mb-6">
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  ¿Qué pasaría si el proyecto avanza hasta...?
+                </label>
+                <div className="flex items-center gap-4">
+                  <input
+                    type="range"
+                    min={proyecto.avance_actual}
+                    max="100"
+                    step="5"
+                    value={avanceSimulado}
+                    onChange={(e) => setAvanceSimulado(parseFloat(e.target.value))}
+                    className="flex-1"
+                  />
+                  <input
+                    type="number"
+                    min={proyecto.avance_actual}
+                    max="100"
+                    value={avanceSimulado}
+                    onChange={(e) => setAvanceSimulado(parseFloat(e.target.value))}
+                    className="w-20 px-3 py-2 border border-gray-300 rounded-lg text-center font-bold text-lg"
+                  />
+                  <span className="font-bold text-lg">%</span>
+                </div>
+                <p className="text-xs text-gray-500 mt-2">
+                  Avance actual: {proyecto.avance_actual}% → Incremento: +{(avanceSimulado - proyecto.avance_actual).toFixed(1)}%
+                </p>
+              </div>
+
+              <Button 
+                onClick={handleSimular} 
+                disabled={simulando || avanceSimulado <= proyecto.avance_actual}
+                className="w-full"
+              >
+                {simulando ? 'Simulando...' : ' Simular Impacto'}
+              </Button>
+            </div>
+
+            {/* Resultados de Simulación */}
+            {simulacion && (
+              <div className="space-y-4">
+                {/* Resumen */}
+                <div className="bg-white rounded-lg p-6">
+                  <h3 className="text-lg font-bold mb-4">📊 Resumen de Proyección</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="bg-blue-50 rounded-lg p-4">
+                      <p className="text-sm text-blue-700">Total Materiales</p>
+                      <p className="text-3xl font-bold text-blue-900">{simulacion.resumen.total_materiales}</p>
+                    </div>
+                    <div className="bg-red-50 rounded-lg p-4">
+                      <p className="text-sm text-red-700">Materiales Críticos</p>
+                      <p className="text-3xl font-bold text-red-900">{simulacion.resumen.materiales_criticos}</p>
+                    </div>
+                    <div className="bg-orange-50 rounded-lg p-4">
+                      <p className="text-sm text-orange-700">Requieren Orden</p>
+                      <p className="text-3xl font-bold text-orange-900">{simulacion.resumen.materiales_requieren_orden}</p>
+                    </div>
+                    <div className="bg-green-50 rounded-lg p-4">
+                      <p className="text-sm text-green-700">Costo Estimado</p>
+                      <p className="text-2xl font-bold text-green-900">${simulacion.resumen.costo_estimado_ordenes.toFixed(0)}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Tabla de Materiales */}
+                <div className="bg-white rounded-lg p-6">
+                  <h3 className="text-lg font-bold mb-4">📦 Proyección de Materiales</h3>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-2 text-left">Material</th>
+                          <th className="px-4 py-2 text-center">Stock Actual</th>
+                          <th className="px-4 py-2 text-center">Consumo</th>
+                          <th className="px-4 py-2 text-center">Stock Final</th>
+                          <th className="px-4 py-2 text-center">Estado</th>
+                          <th className="px-4 py-2 text-center">Acción</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {simulacion.materiales.map(mat => (
+                          <tr key={mat.material_id} className="hover:bg-gray-50">
+                            <td className="px-4 py-3">
+                              <div>
+                                <p className="font-medium">{mat.material_nombre}</p>
+                                <p className="text-xs text-gray-500">{mat.proveedor_nombre}</p>
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              <p className="font-semibold">{mat.stock_actual.toFixed(2)}</p>
+                              <p className="text-xs text-gray-500">{mat.unidad_abrev}</p>
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              <p className="font-semibold text-red-600">-{mat.consumo_proyectado.toFixed(2)}</p>
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              <p className={`font-bold ${mat.stock_proyectado < 0 ? 'text-red-600' : 'text-gray-900'}`}>
+                                {mat.stock_proyectado.toFixed(2)}
+                              </p>
+                              <p className="text-xs text-gray-500">{mat.porcentaje_stock.toFixed(0)}%</p>
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              <span className={`inline-block px-2 py-1 text-xs font-bold rounded border ${getColorEstado(mat.estado)}`}>
+                                {mat.estado.toUpperCase()}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              {mat.requiere_orden ? (
+                                <Button 
+                                  size="sm"
+                                  onClick={() => navigate(`/ordenes?materialId=${mat.material_id}&proyectoId=${id}&cantidad=${mat.cantidad_ordenar.toFixed(2)}`)}
+                                >
+                                  📋 Ordenar
+                                </Button>
+                              ) : (
+                                <span className="text-green-600 text-xs font-semibold">✓ OK</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Actividades */}
+        <div className="bg-white rounded-lg shadow">
+          <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+            <h2 className="text-lg font-semibold">Actividades del Proyecto</h2>
+            <Button size="sm" onClick={() => {
+              setEditingActividad(null);
+              setShowActividadModal(true);
+            }}>
+              + Nueva Actividad
+            </Button>
+          </div>
+
+          <div className="p-6">
+            {actividades.length === 0 ? (
+              <div className="text-center py-12">
+                <p className="text-gray-500 mb-4">No hay actividades registradas</p>
+                <Button onClick={() => setShowActividadModal(true)}>
+                  Crear primera actividad
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {actividades.map((actividad) => (
+                  <div key={actividad.id} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
+                    <div className="flex items-start justify-between mb-3">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-xs font-semibold text-gray-500">#{actividad.orden}</span>
+                          <h3 className="font-semibold text-gray-900">{actividad.nombre}</h3>
+                        </div>
+                        {actividad.descripcion && (
+                          <p className="text-sm text-gray-600">{actividad.descripcion}</p>
+                        )}
+                      </div>
+                      <div className="flex gap-2">
+                        <Button 
+                          size="sm" 
+                          variant="ghost"
+                          onClick={() => handleVerMateriales(actividad)}
+                        >
+                          📦 Materiales
+                        </Button>
+                        <Button 
+                          size="sm" 
+                          variant="ghost"
+                          onClick={() => {
+                            setEditingActividad(actividad);
+                            setShowActividadModal(true);
+                          }}
+                        >
+                          ✏️
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4 mb-3 text-sm">
+                      {actividad.fecha_inicio_planificada && (
+                        <div>
+                          <p className="text-gray-500">Inicio Planificado</p>
+                          <p className="font-medium">{new Date(actividad.fecha_inicio_planificada).toLocaleDateString()}</p>
+                        </div>
+                      )}
+                      {actividad.fecha_fin_planificada && (
+                        <div>
+                          <p className="text-gray-500">Fin Planificado</p>
+                          <p className="font-medium">{new Date(actividad.fecha_fin_planificada).toLocaleDateString()}</p>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Avance planificado vs real */}
+                    <div className="mb-3">
+                      <div className="flex items-center justify-between text-sm mb-1">
+                        <span className="text-gray-600">Avance Planificado</span>
+                        <span className="font-medium">{actividad.avance_planificado}%</span>
+                      </div>
+                      <div className="w-full bg-gray-200 rounded-full h-2 mb-2">
+                        <div 
+                          className="h-2 rounded-full bg-gray-400"
+                          style={{ width: `${actividad.avance_planificado}%` }}
+                        />
+                      </div>
+
+                      <div className="flex items-center justify-between text-sm mb-1">
+                        <span className="text-gray-600">Avance Real</span>
+                        <span className="font-semibold">{actividad.avance_real}%</span>
+                      </div>
+                      <div className="w-full bg-gray-200 rounded-full h-2">
+                        <div 
+                          className={`h-2 rounded-full ${
+                            actividad.avance_real < actividad.avance_planificado ? 'bg-red-500' :
+                            actividad.avance_real === actividad.avance_planificado ? 'bg-green-500' :
+                            'bg-blue-500'
+                          }`}
+                          style={{ width: `${actividad.avance_real}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Control de avance */}
+                    <div className="flex items-center gap-2">
+                      <label className="text-sm text-gray-600 font-medium">Actualizar avance:</label>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        step="5"
+                        value={actividad.avance_real}
+                        onChange={(e) => handleUpdateAvance(actividad.id, parseFloat(e.target.value))}
+                        className="flex-1"
+                      />
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="1"
+                        value={actividad.avance_real}
+                        onChange={(e) => handleUpdateAvance(actividad.id, parseFloat(e.target.value))}
+                        className="w-16 px-2 py-1 border border-gray-300 rounded text-sm text-center"
+                      />
+                      <span className="text-sm font-medium">%</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Modal de Actividad */}
+      <Modal
+        isOpen={showActividadModal}
+        onClose={() => {
+          setShowActividadModal(false);
+          setEditingActividad(null);
+        }}
+        title={editingActividad ? 'Editar Actividad' : 'Nueva Actividad'}
+        size="lg"
+      >
+        <form onSubmit={handleSaveActividad}>
+          <div className="space-y-4">
+            <div className="grid grid-cols-4 gap-4">
+              <Input
+                name="orden"
+                label="Orden"
+                type="number"
+                required
+                defaultValue={editingActividad?.orden || actividades.length + 1}
+              />
+              <div className="col-span-3">
+                <Input
+                  name="nombre"
+                  label="Nombre de la Actividad"
+                  required
+                  defaultValue={editingActividad?.nombre}
+                  placeholder="Ej: Excavación y movimiento de tierra"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Descripción
+              </label>
+              <textarea
+                name="descripcion"
+                rows={2}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                defaultValue={editingActividad?.descripcion || ''}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <Input
+                name="fecha_inicio_planificada"
+                label="Fecha Inicio Planificada"
+                type="date"
+                defaultValue={editingActividad?.fecha_inicio_planificada || ''}
+              />
+              <Input
+                name="fecha_fin_planificada"
+                label="Fecha Fin Planificada"
+                type="date"
+                defaultValue={editingActividad?.fecha_fin_planificada || ''}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <Input
+                name="avance_planificado"
+                label="Avance Planificado (%)"
+                type="number"
+                step="0.1"
+                min="0"
+                max="100"
+                defaultValue={editingActividad?.avance_planificado || 0}
+              />
+              <Input
+                name="avance_real"
+                label="Avance Real (%)"
+                type="number"
+                step="0.1"
+                min="0"
+                max="100"
+                defaultValue={editingActividad?.avance_real || 0}
+              />
+            </div>
+          </div>
+
+          <div className="flex gap-3 mt-6 pt-4 border-t border-gray-200">
+            <Button type="submit" className="flex-1">
+              {editingActividad ? 'Actualizar' : 'Crear'} Actividad
+            </Button>
+            <Button 
+              type="button" 
+              variant="ghost" 
+              onClick={() => {
+                setShowActividadModal(false);
+                setEditingActividad(null);
+              }}
+            >
+              Cancelar
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* ============================================== */}
+      {/* MODAL DE MATERIALES DE ACTIVIDAD (NUEVO) */}
+      {/* ============================================== */}
+      <Modal
+        isOpen={showMaterialesModal}
+        onClose={() => {
+          setShowMaterialesModal(false);
+          setSelectedActividad(null);
+          setMaterialesActividad([]);
+        }}
+        title={`Materiales - ${selectedActividad?.nombre || ''}`}
+        size="xl"
+      >
+        <div className="space-y-4">
+          {/* Header con botón de agregar */}
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-gray-600">
+              Gestiona los materiales necesarios para esta actividad
+            </p>
+            <Button 
+              size="sm" 
+              onClick={() => setShowAddMaterialModal(true)}
+              disabled={materialesDisponibles.length === 0}
+            >
+              + Agregar Material
+            </Button>
+          </div>
+
+          {/* Lista de materiales asignados */}
+          {materialesActividad.length === 0 ? (
+            <div className="text-center py-8 bg-gray-50 rounded-lg">
+              <p className="text-gray-500 mb-2">No hay materiales asignados a esta actividad</p>
+              <p className="text-sm text-gray-400">
+                Los materiales asignados se usarán para calcular alertas y proyecciones
+              </p>
+            </div>
+          ) : (
+            <div className="border border-gray-200 rounded-lg overflow-hidden">
+              <table className="w-full">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Material</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Cantidad Estimada</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Cantidad Consumida</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Pendiente</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Costo Est.</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {materialesActividad.map((ma) => {
+                    const pendiente = ma.cantidad_estimada - ma.cantidad_consumida;
+                    const costoEstimado = ma.cantidad_estimada * (ma.precio_unitario || 0);
+                    
+                    return (
+                      <tr key={ma.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-3">
+                          <div>
+                            <p className="font-medium text-gray-900">{ma.material_nombre}</p>
+                            <p className="text-xs text-gray-500">{ma.unidad_abrev}</p>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={ma.cantidad_estimada}
+                            onChange={(e) => handleUpdateMaterial(ma.id, parseFloat(e.target.value) || 0, ma.cantidad_consumida)}
+                            className="w-24 px-2 py-1 border border-gray-300 rounded text-center text-sm"
+                          />
+                        </td>
+                        <td className="px-4 py-3">
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            max={ma.cantidad_estimada}
+                            value={ma.cantidad_consumida}
+                            onChange={(e) => handleUpdateMaterial(ma.id, ma.cantidad_estimada, parseFloat(e.target.value) || 0)}
+                            className="w-24 px-2 py-1 border border-gray-300 rounded text-center text-sm"
+                          />
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <span className={`font-semibold ${pendiente > 0 ? 'text-orange-600' : 'text-green-600'}`}>
+                            {pendiente.toFixed(2)}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-center text-sm font-medium text-gray-900">
+                          ${costoEstimado.toFixed(2)}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <Button 
+                            size="sm" 
+                            variant="danger"
+                            onClick={() => handleRemoveMaterial(ma.id)}
+                          >
+                            🗑️
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot className="bg-gray-50">
+                  <tr>
+                    <td colSpan={4} className="px-4 py-3 text-right font-semibold text-gray-700">
+                      Total Estimado:
+                    </td>
+                    <td className="px-4 py-3 text-center font-bold text-gray-900">
+                      ${materialesActividad.reduce((sum, ma) => sum + (ma.cantidad_estimada * (ma.precio_unitario || 0)), 0).toFixed(2)}
+                    </td>
+                    <td></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+
+          {/* Info box */}
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <p className="text-sm text-blue-800">
+              <strong>💡 Tip:</strong> La "Cantidad Estimada" es lo que se planea usar en total para esta actividad. 
+              La "Cantidad Consumida" es lo que ya se ha usado. El sistema usa estos datos para calcular alertas 
+              de desabastecimiento y proyecciones en el simulador.
+            </p>
+          </div>
+        </div>
+      </Modal>
+
+      {/* ============================================== */}
+      {/* MODAL DE AGREGAR MATERIAL (NUEVO) */}
+      {/* ============================================== */}
+      <Modal
+        isOpen={showAddMaterialModal}
+        onClose={() => setShowAddMaterialModal(false)}
+        title="Agregar Material a la Actividad"
+        size="md"
+      >
+        <form onSubmit={handleAddMaterial}>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Material <span className="text-red-500">*</span>
+              </label>
+              <select
+                name="material_id"
+                required
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">Seleccionar material...</option>
+                {materialesDisponibles.map(m => (
+                  <option key={m.id} value={m.id}>
+                    {m.nombre} - Stock: {m.stock_actual.toFixed(2)} {m.unidad_abrev} - ${m.precio_unitario}/{m.unidad_abrev}
+                  </option>
+                ))}
+              </select>
+              {materialesDisponibles.length === 0 && (
+                <p className="text-xs text-orange-600 mt-1">
+                  Todos los materiales ya están asignados a esta actividad
+                </p>
+              )}
+            </div>
+
+            <Input
+              name="cantidad_estimada"
+              label="Cantidad Estimada"
+              type="number"
+              step="0.01"
+              min="0.01"
+              required
+              placeholder="0.00"
+            />
+
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+              <p className="text-sm text-yellow-800">
+                <strong>Nota:</strong> La cantidad estimada representa el total de material que se espera 
+                consumir durante toda la ejecución de esta actividad.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex gap-3 mt-6 pt-4 border-t border-gray-200">
+            <Button type="submit" className="flex-1" disabled={materialesDisponibles.length === 0}>
+              Agregar Material
+            </Button>
+            <Button type="button" variant="ghost" onClick={() => setShowAddMaterialModal(false)}>
+              Cancelar
+            </Button>
+          </div>
+        </form>
+      </Modal>
+    </div>
+  );
+}
