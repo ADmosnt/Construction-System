@@ -241,12 +241,69 @@ export function registerIpcHandlers(): void {
   });
 
   ipcMain.handle('db:actividades:update', async (_, id: number, actividad: any) => {
-    return dbHelpers.run(
-      `UPDATE actividades 
-       SET avance_real = ?, fecha_inicio_real = ?, fecha_fin_real = ?
-       WHERE id = ?`,
-      [actividad.avance_real, actividad.fecha_inicio_real, actividad.fecha_fin_real, id]
-    );
+    return dbHelpers.transaction(() => {
+      // Obtener estado actual de la actividad
+      const actividadActual = dbHelpers.get<any>('SELECT * FROM actividades WHERE id = ?', [id]);
+      if (!actividadActual) throw new Error('Actividad no encontrada');
+
+      const avanceAnterior = actividadActual.avance_real || 0;
+      const avanceNuevo = actividad.avance_real !== undefined ? actividad.avance_real : avanceAnterior;
+
+      // Actualizar la actividad (preservar campos no enviados)
+      dbHelpers.run(
+        `UPDATE actividades
+         SET avance_real = ?, fecha_inicio_real = ?, fecha_fin_real = ?
+         WHERE id = ?`,
+        [
+          avanceNuevo,
+          actividad.fecha_inicio_real !== undefined ? actividad.fecha_inicio_real : actividadActual.fecha_inicio_real,
+          actividad.fecha_fin_real !== undefined ? actividad.fecha_fin_real : actividadActual.fecha_fin_real,
+          id
+        ]
+      );
+
+      // Si el avance aumentó, consumir materiales proporcionalmente
+      const deltaAvance = avanceNuevo - avanceAnterior;
+      if (deltaAvance > 0) {
+        const materiales = dbHelpers.all<any>(
+          `SELECT ma.*, a.proyecto_id
+           FROM materiales_actividad ma
+           JOIN actividades a ON ma.actividad_id = a.id
+           WHERE ma.actividad_id = ?`,
+          [id]
+        );
+
+        for (const mat of materiales) {
+          // Calcular consumo proporcional al incremento de avance
+          const consumoProporcional = (deltaAvance / 100) * mat.cantidad_estimada;
+          // No consumir más de lo pendiente
+          const pendiente = mat.cantidad_estimada - mat.cantidad_consumida;
+          const consumoReal = Math.min(consumoProporcional, Math.max(0, pendiente));
+
+          if (consumoReal > 0) {
+            // Crear movimiento de salida (el trigger de la BD actualiza stock_actual)
+            dbHelpers.run(
+              `INSERT INTO movimientos_inventario (material_id, proyecto_id, tipo, cantidad, motivo, responsable)
+               VALUES (?, ?, 'salida', ?, ?, 'Sistema')`,
+              [
+                mat.material_id,
+                mat.proyecto_id,
+                consumoReal,
+                `Consumo por avance de actividad (${avanceAnterior}% → ${avanceNuevo}%)`
+              ]
+            );
+
+            // Actualizar cantidad consumida en materiales_actividad
+            dbHelpers.run(
+              `UPDATE materiales_actividad SET cantidad_consumida = cantidad_consumida + ? WHERE id = ?`,
+              [consumoReal, mat.id]
+            );
+          }
+        }
+      }
+
+      return { success: true };
+    });
   });
 
   // ==================== ALERTAS ====================
@@ -474,11 +531,66 @@ export function registerIpcHandlers(): void {
       throw new Error('Este material ya está asignado a esta actividad');
     }
 
-    return dbHelpers.run(
+    // Validar que la cantidad estimada no supere el stock disponible
+    const material = dbHelpers.get<any>(
+      'SELECT id, nombre, stock_actual, stock_minimo FROM materiales WHERE id = ?',
+      [data.material_id]
+    );
+
+    if (!material) {
+      throw new Error('Material no encontrado');
+    }
+
+    if (data.cantidad_estimada > material.stock_actual) {
+      throw new Error(
+        `La cantidad estimada (${data.cantidad_estimada}) supera el stock disponible de "${material.nombre}" (${material.stock_actual}). No puede asignar más material del que existe en inventario.`
+      );
+    }
+
+    // Insertar la asignación
+    const result = dbHelpers.run(
       `INSERT INTO materiales_actividad (actividad_id, material_id, cantidad_estimada, cantidad_consumida)
        VALUES (?, ?, ?, ?)`,
       [data.actividad_id, data.material_id, data.cantidad_estimada, data.cantidad_consumida || 0]
     );
+
+    // Generar alertas si el stock quedará comprometido
+    const actividad = dbHelpers.get<any>(
+      'SELECT proyecto_id FROM actividades WHERE id = ?',
+      [data.actividad_id]
+    );
+
+    if (actividad) {
+      const stockRestante = material.stock_actual - data.cantidad_estimada;
+
+      if (stockRestante === 0) {
+        // Alerta: el stock se agotará por completo
+        dbHelpers.run(
+          `INSERT INTO alertas (proyecto_id, material_id, tipo, nivel, mensaje, cantidad_sugerida, estado)
+           VALUES (?, ?, 'desabastecimiento_inminente', 'critica', ?, ?, 'pendiente')`,
+          [
+            actividad.proyecto_id,
+            material.id,
+            `Al consumir las ${data.cantidad_estimada} unidades de "${material.nombre}" asignadas a esta actividad, el stock quedará en 0. Se recomienda generar una orden de compra de inmediato.`,
+            data.cantidad_estimada
+          ]
+        );
+      } else if (stockRestante < material.stock_minimo) {
+        // Alerta: el stock quedará por debajo del mínimo
+        dbHelpers.run(
+          `INSERT INTO alertas (proyecto_id, material_id, tipo, nivel, mensaje, cantidad_sugerida, estado)
+           VALUES (?, ?, 'stock_minimo', 'alta', ?, ?, 'pendiente')`,
+          [
+            actividad.proyecto_id,
+            material.id,
+            `Al asignar ${data.cantidad_estimada} unidades de "${material.nombre}", el stock proyectado (${stockRestante.toFixed(2)}) quedará por debajo del mínimo requerido (${material.stock_minimo}). Considere reabastecer.`,
+            material.stock_minimo - stockRestante
+          ]
+        );
+      }
+    }
+
+    return result;
   });
 
   ipcMain.handle('db:actividades:updateMaterial', async (_, id: number, data: any) => {
