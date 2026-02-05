@@ -25,6 +25,9 @@ export default function ProyectoDetallePage() {
   const [todosMateriales, setTodosMateriales] = useState<Material[]>([]);
   const [showAddMaterialModal, setShowAddMaterialModal] = useState(false);
   
+  // Material seleccionado en el formulario de agregar
+  const [selectedMaterialId, setSelectedMaterialId] = useState<number | null>(null);
+
   // Simulador
   const [showSimulador, setShowSimulador] = useState(false);
   const [avanceSimulado, setAvanceSimulado] = useState(0);
@@ -137,13 +140,16 @@ export default function ProyectoDetallePage() {
     try {
       await db.actividades.update(actividadId, { avance_real: nuevoAvance });
       await loadActividades();
-      
+
       // Recalcular avance del proyecto
       const acts = await db.actividades.getByProyecto(Number(id));
       const avancePromedio = acts.reduce((sum, act) => sum + act.avance_real, 0) / acts.length;
       await db.proyectos.update(Number(id), { avance_actual: Math.round(avancePromedio * 10) / 10 });
       await loadProyecto();
-      
+
+      // Refrescar materiales para reflejar el consumo actualizado
+      await loadTodosMateriales();
+
       // GENERAR ALERTAS AUTOMÁTICAMENTE
       await db.alertas.generar(Number(id));
     } catch (error) {
@@ -812,11 +818,11 @@ export default function ProyectoDetallePage() {
       {/* ============================================== */}
       <Modal
         isOpen={showAddMaterialModal}
-        onClose={() => setShowAddMaterialModal(false)}
+        onClose={() => { setShowAddMaterialModal(false); setSelectedMaterialId(null); }}
         title="Agregar Material a la Actividad"
         size="md"
       >
-        <form onSubmit={handleAddMaterial}>
+        <form onSubmit={(e) => { handleAddMaterial(e); setSelectedMaterialId(null); }}>
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -826,6 +832,7 @@ export default function ProyectoDetallePage() {
                 name="material_id"
                 required
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                onChange={(e) => setSelectedMaterialId(parseInt(e.target.value) || null)}
               >
                 <option value="">Seleccionar material...</option>
                 {materialesDisponibles.map(m => (
@@ -841,20 +848,37 @@ export default function ProyectoDetallePage() {
               )}
             </div>
 
+            {/* Mostrar info de stock del material seleccionado */}
+            {selectedMaterialId && (() => {
+              const mat = todosMateriales.find(m => m.id === selectedMaterialId);
+              if (!mat) return null;
+              return (
+                <div className={`border rounded-lg p-3 ${mat.stock_actual <= mat.stock_minimo ? 'bg-red-50 border-red-200' : 'bg-blue-50 border-blue-200'}`}>
+                  <p className={`text-sm font-semibold ${mat.stock_actual <= mat.stock_minimo ? 'text-red-800' : 'text-blue-800'}`}>
+                    Stock disponible: {mat.stock_actual.toFixed(2)} {mat.unidad_abrev}
+                  </p>
+                  <p className="text-xs text-gray-600 mt-1">
+                    Stock minimo: {mat.stock_minimo.toFixed(2)} {mat.unidad_abrev} | La cantidad estimada no puede superar el stock disponible.
+                  </p>
+                </div>
+              );
+            })()}
+
             <Input
               name="cantidad_estimada"
               label="Cantidad Estimada"
               type="number"
               step="0.01"
               min="0.01"
+              max={selectedMaterialId ? (todosMateriales.find(m => m.id === selectedMaterialId)?.stock_actual || undefined) : undefined}
               required
               placeholder="0.00"
             />
 
             <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
               <p className="text-sm text-yellow-800">
-                <strong>Nota:</strong> La cantidad estimada representa el total de material que se espera 
-                consumir durante toda la ejecución de esta actividad.
+                <strong>Nota:</strong> La cantidad estimada representa el total de material que se espera
+                consumir durante toda la ejecucion de esta actividad. No puede superar la cantidad en existencias.
               </p>
             </div>
           </div>
@@ -863,7 +887,7 @@ export default function ProyectoDetallePage() {
             <Button type="submit" className="flex-1" disabled={materialesDisponibles.length === 0}>
               Agregar Material
             </Button>
-            <Button type="button" variant="ghost" onClick={() => setShowAddMaterialModal(false)}>
+            <Button type="button" variant="ghost" onClick={() => { setShowAddMaterialModal(false); setSelectedMaterialId(null); }}>
               Cancelar
             </Button>
           </div>
