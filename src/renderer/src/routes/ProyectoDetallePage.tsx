@@ -450,6 +450,52 @@ export default function ProyectoDetallePage() {
               </div>
             </div>
 
+            {/* Panel explicativo del simulador */}
+            <div className="bg-white border border-purple-200 rounded-lg p-5 mb-4">
+              <h3 className="text-sm font-bold text-purple-900 mb-3">Como funciona el simulador?</h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-3">
+                <div className="bg-purple-50 rounded-lg p-3">
+                  <p className="text-xs font-bold text-purple-800 mb-1">1. Define un avance hipotetico</p>
+                  <p className="text-xs text-purple-700">
+                    Usa el control deslizante o escribe un porcentaje de avance mayor al actual.
+                    El simulador calculara que pasaria si el proyecto llegara a ese punto.
+                  </p>
+                </div>
+                <div className="bg-purple-50 rounded-lg p-3">
+                  <p className="text-xs font-bold text-purple-800 mb-1">2. Calculo del consumo</p>
+                  <p className="text-xs text-purple-700">
+                    Para cada actividad, se calcula: <strong>consumo = (avance_simulado / 100) x cantidad_estimada - cantidad_ya_consumida</strong>.
+                    Se agrupa por material sumando todas las actividades.
+                  </p>
+                </div>
+                <div className="bg-purple-50 rounded-lg p-3">
+                  <p className="text-xs font-bold text-purple-800 mb-1">3. Proyeccion de stock</p>
+                  <p className="text-xs text-purple-700">
+                    Se resta el consumo proyectado al stock actual: <strong>stock_final = stock_actual - consumo</strong>.
+                    Si el resultado cae bajo el minimo, se sugiere generar una orden de compra.
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-4 text-xs">
+                <div className="flex items-center gap-1">
+                  <span className="inline-block w-3 h-3 rounded bg-red-200 border border-red-400"></span>
+                  <span className="text-gray-600"><strong>Critico:</strong> stock &le; 0 o &lt; 50% del minimo</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="inline-block w-3 h-3 rounded bg-orange-200 border border-orange-400"></span>
+                  <span className="text-gray-600"><strong>Bajo:</strong> stock &lt; minimo</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="inline-block w-3 h-3 rounded bg-yellow-200 border border-yellow-400"></span>
+                  <span className="text-gray-600"><strong>Alerta:</strong> stock &lt; 120% del minimo</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="inline-block w-3 h-3 rounded bg-green-200 border border-green-400"></span>
+                  <span className="text-gray-600"><strong>OK:</strong> stock suficiente</span>
+                </div>
+              </div>
+            </div>
+
             <div className="bg-white rounded-lg p-6 mb-4">
               <div className="mb-6">
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
