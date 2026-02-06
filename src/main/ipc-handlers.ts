@@ -469,27 +469,55 @@ export function registerIpcHandlers(): void {
   });
 
   ipcMain.handle('db:ordenes:recibir', async (_, ordenId: number) => {
-    // Actualizar estado de la orden
-    dbHelpers.run(
-      `UPDATE ordenes_compra SET estado = 'entregada' WHERE id = ?`,
-      [ordenId]
-    );
-
-    // Obtener detalles de la orden
-    const detalles = dbHelpers.all(`
-      SELECT material_id, cantidad FROM detalle_orden_compra WHERE orden_compra_id = ?
-    `, [ordenId]);
-
-    // Actualizar stock de cada material (crear movimiento de entrada)
-    for (const detalle of detalles) {
-      dbHelpers.run(
-        `INSERT INTO movimientos_inventario (material_id, tipo, cantidad, motivo, responsable)
-         VALUES (?, 'entrada', ?, ?, ?)`,
-        [detalle.material_id, detalle.cantidad, `Recepción de orden #${ordenId}`, 'Sistema']
+    return dbHelpers.transaction(() => {
+      // Obtener la orden con su proyecto asociado
+      const orden = dbHelpers.get<any>(
+        'SELECT * FROM ordenes_compra WHERE id = ?',
+        [ordenId]
       );
-    }
+      if (!orden) throw new Error('Orden no encontrada');
 
-    return { success: true };
+      // Actualizar estado de la orden
+      dbHelpers.run(
+        `UPDATE ordenes_compra SET estado = 'entregada' WHERE id = ?`,
+        [ordenId]
+      );
+
+      // Obtener detalles de la orden
+      const detalles = dbHelpers.all<any>(`
+        SELECT material_id, cantidad FROM detalle_orden_compra WHERE orden_compra_id = ?
+      `, [ordenId]);
+
+      // Actualizar stock de cada material (crear movimiento de entrada)
+      for (const detalle of detalles) {
+        dbHelpers.run(
+          `INSERT INTO movimientos_inventario (material_id, tipo, cantidad, motivo, responsable)
+           VALUES (?, 'entrada', ?, ?, ?)`,
+          [detalle.material_id, detalle.cantidad, `Recepción de orden #${ordenId}`, 'Sistema']
+        );
+
+        // Auto-resolver alertas: si el stock ahora supera el minimo, marcar alertas como atendidas
+        const materialActualizado = dbHelpers.get<any>(
+          'SELECT id, stock_actual, stock_minimo FROM materiales WHERE id = ?',
+          [detalle.material_id]
+        );
+
+        if (materialActualizado && materialActualizado.stock_actual >= materialActualizado.stock_minimo) {
+          dbHelpers.run(
+            `UPDATE alertas SET estado = 'atendida', atendida_at = CURRENT_TIMESTAMP
+             WHERE material_id = ? AND estado = 'pendiente'`,
+            [detalle.material_id]
+          );
+        }
+      }
+
+      // Regenerar alertas del proyecto si tiene uno asociado
+      if (orden.proyecto_id) {
+        generarAlertasProyecto(orden.proyecto_id);
+      }
+
+      return { success: true };
+    });
   });
 
   // ==================== SIMULADOR ====================

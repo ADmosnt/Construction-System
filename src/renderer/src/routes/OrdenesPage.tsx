@@ -5,6 +5,7 @@ import { useSearchParams } from 'react-router-dom';
 import Header from '../components/layout/Header';
 import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
+import { showToast } from '../components/ui/Toast';
 import { db } from '../lib/database';
 import type { OrdenCompra, DetalleOrdenCompra, Material, Proveedor, Proyecto } from '../types';
 
@@ -91,9 +92,10 @@ export default function OrdenesPage() {
 
       await loadData();
       setShowModal(false);
+      showToast('Orden de compra creada exitosamente', 'success');
     } catch (error) {
       console.error('Error creating orden:', error);
-      alert('Error al crear la orden');
+      showToast('Error al crear la orden', 'error');
     }
   };
 
@@ -123,7 +125,7 @@ export default function OrdenesPage() {
     try {
       await db.ordenes.recibir(ordenId);
       await loadData();
-      alert('✅ Orden recibida. Stock actualizado automáticamente.');
+      showToast('Orden recibida', 'success', 'El stock se actualizo automaticamente y las alertas resueltas fueron cerradas.');
     } catch (error) {
       console.error('Error recibiendo orden:', error);
     }
@@ -136,6 +138,43 @@ export default function OrdenesPage() {
       await loadData();
     } catch (error) {
       console.error('Error cancelando orden:', error);
+    }
+  };
+
+  const handleEnviarEmail = async (orden: OrdenCompra) => {
+    try {
+      const det = await db.ordenes.getDetalles(orden.id);
+      const proveedor = proveedores.find(p => p.id === orden.proveedor_id);
+      if (!proveedor || !proveedor.email) {
+        showToast('Este proveedor no tiene email registrado', 'warning', 'Agregue un email en el modulo de Proveedores.');
+        return;
+      }
+
+      const materialesTexto = det.map(d =>
+        `  - ${d.material_nombre}: ${d.cantidad} ${d.unidad_abrev || 'unidades'} (Precio unit.: $${d.precio_unitario})`
+      ).join('\n');
+
+      const proyecto = proyectos.find(p => p.id === orden.proyecto_id);
+
+      const subject = encodeURIComponent(`Orden de Compra #${orden.id} - Solicitud de Materiales`);
+      const body = encodeURIComponent(
+        `Estimado/a ${proveedor.contacto || proveedor.nombre},\n\n` +
+        `Por medio del presente, le solicitamos la siguiente orden de compra:\n\n` +
+        `ORDEN DE COMPRA #${orden.id}\n` +
+        `Fecha de emision: ${new Date(orden.fecha_emision).toLocaleDateString()}\n` +
+        (orden.fecha_entrega_estimada ? `Fecha de entrega estimada: ${new Date(orden.fecha_entrega_estimada).toLocaleDateString()}\n` : '') +
+        (proyecto ? `Proyecto: ${proyecto.nombre}\n` : '') +
+        `\nMateriales solicitados:\n${materialesTexto}\n\n` +
+        `Total estimado: $${orden.total.toFixed(2)}\n\n` +
+        (orden.notas ? `Notas adicionales: ${orden.notas}\n\n` : '') +
+        `Quedamos atentos a su confirmacion.\n\nSaludos cordiales.`
+      );
+
+      window.open(`mailto:${proveedor.email}?subject=${subject}&body=${body}`, '_blank');
+      showToast('Email preparado', 'success', `Se abrio el cliente de correo para enviar a ${proveedor.email}`);
+    } catch (error) {
+      console.error('Error preparando email:', error);
+      showToast('Error al preparar el email', 'error');
     }
   };
 
@@ -257,6 +296,11 @@ export default function OrdenesPage() {
                         <Button size="sm" variant="ghost" onClick={() => handleVerDetalle(orden)}>
                           👁️
                         </Button>
+                        {(orden.estado === 'pendiente' || orden.estado === 'confirmada') && (
+                          <Button size="sm" variant="secondary" onClick={() => handleEnviarEmail(orden)}>
+                            📧
+                          </Button>
+                        )}
                         {orden.estado === 'pendiente' && (
                           <>
                             <Button size="sm" onClick={() => handleConfirmar(orden.id)}>
@@ -395,6 +439,14 @@ export default function OrdenesPage() {
               <div>
                 <p className="text-sm text-gray-500">Notas</p>
                 <p className="text-sm">{selectedOrden.notas}</p>
+              </div>
+            )}
+
+            {(selectedOrden.estado === 'pendiente' || selectedOrden.estado === 'confirmada') && (
+              <div className="pt-3 border-t">
+                <Button onClick={() => handleEnviarEmail(selectedOrden)} className="w-full">
+                  📧 Enviar por Email al Proveedor
+                </Button>
               </div>
             )}
           </div>

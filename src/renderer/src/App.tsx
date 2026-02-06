@@ -2,6 +2,7 @@
 
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Layout from './components/layout/Layout';
+import ToastContainer from './components/ui/Toast';
 import DashboardPage from './routes/DashboardPage';
 import ProyectosPage from './routes/ProyectosPage';
 import ProyectoDetallePage from './routes/ProyectoDetallePage';
@@ -14,6 +15,7 @@ import OrdenesPage from './routes/OrdenesPage';
 function App() {
   return (
     <BrowserRouter>
+      <ToastContainer />
       <Routes>
         <Route path="/" element={<Layout />}>
           <Route index element={<DashboardPage />} />
