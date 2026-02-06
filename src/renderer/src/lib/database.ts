@@ -1,17 +1,18 @@
 // src/render/src/lib/database.ts
 
-import type { 
-  Proyecto, 
-  Material, 
-  Proveedor, 
-  Actividad, 
-  Alerta, 
+import type {
+  Proyecto,
+  Material,
+  Proveedor,
+  Actividad,
+  Alerta,
   UnidadMedida,
-  MovimientoInventario, 
+  MovimientoInventario,
   OrdenCompra,
   DetalleOrdenCompra,
   ResultadoSimulacion,
-  MaterialActividad
+  MaterialActividad,
+  ConsumoConfirmacion
 } from '../types';
 
 // Cliente de base de datos para el renderer process
@@ -115,6 +116,14 @@ export const db = {
     
     removeMaterial: async (id: number): Promise<void> => {
       return window.electron.ipcRenderer.invoke('db:actividades:removeMaterial', id);
+    },
+
+    confirmarAvance: async (data: {
+      actividad_id: number;
+      nuevo_avance: number;
+      consumos: ConsumoConfirmacion[];
+    }): Promise<{ success: boolean; advertencias?: string[] }> => {
+      return window.electron.ipcRenderer.invoke('db:actividades:confirmarAvance', data);
     }
   },
 

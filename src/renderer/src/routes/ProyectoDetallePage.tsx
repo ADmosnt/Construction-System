@@ -35,9 +35,13 @@ export default function ProyectoDetallePage() {
   // Material seleccionado en el formulario de agregar
   const [selectedMaterialId, setSelectedMaterialId] = useState<number | null>(null)
 
-  // Avance por actividad (estado local para inputs, evita spam a BD)
-  const [avanceInputs, setAvanceInputs] = useState<Record<number, number>>({})
-  const [updatingAvance, setUpdatingAvance] = useState<number | null>(null)
+  // Modal de Reflejar Avance
+  const [showAvanceModal, setShowAvanceModal] = useState(false)
+  const [avanceActividad, setAvanceActividad] = useState<Actividad | null>(null)
+  const [avanceNuevo, setAvanceNuevo] = useState(0)
+  const [avanceMateriales, setAvanceMateriales] = useState<MaterialActividad[]>([])
+  const [consumosReales, setConsumosReales] = useState<Record<number, number>>({})
+  const [confirmandoAvance, setConfirmandoAvance] = useState(false)
 
   // Simulador
   const [showSimulador, setShowSimulador] = useState(false)
@@ -52,15 +56,6 @@ export default function ProyectoDetallePage() {
       loadTodosMateriales()
     }
   }, [id])
-
-  // Sincronizar avanceInputs cuando se cargan/recargan actividades
-  useEffect(() => {
-    const inputs: Record<number, number> = {}
-    actividades.forEach((a) => {
-      inputs[a.id] = a.avance_real
-    })
-    setAvanceInputs(inputs)
-  }, [actividades])
 
   const loadProyecto = async () => {
     try {
@@ -91,6 +86,8 @@ export default function ProyectoDetallePage() {
       console.error('Error loading materiales:', error)
     }
   }
+
+  // ==================== MATERIALES DE ACTIVIDAD ====================
 
   const handleVerMateriales = async (actividad: Actividad) => {
     try {
@@ -162,20 +159,91 @@ export default function ProyectoDetallePage() {
     }
   }
 
-  // Confirmar avance: una sola operacion al hacer clic en "Actualizar"
-  const handleConfirmAvance = async (actividadId: number) => {
-    const nuevoAvance = avanceInputs[actividadId]
-    if (nuevoAvance === undefined) return
+  // ==================== REFLEJAR AVANCE ====================
 
-    const actividad = actividades.find((a) => a.id === actividadId)
-    if (!actividad || nuevoAvance === actividad.avance_real) return
+  const handleOpenAvanceModal = async (actividad: Actividad) => {
+    try {
+      const mats = await db.actividades.getMateriales(actividad.id)
+      setAvanceActividad(actividad)
+      setAvanceMateriales(mats)
+      setAvanceNuevo(actividad.avance_real)
+      // Inicializar consumos reales con 0 (se calculan al cambiar el %)
+      const initialConsumos: Record<number, number> = {}
+      mats.forEach((m) => {
+        initialConsumos[m.id] = 0
+      })
+      setConsumosReales(initialConsumos)
+      setShowAvanceModal(true)
+    } catch (error) {
+      console.error('Error opening avance modal:', error)
+    }
+  }
+
+  // Calcular consumo proyectado por material segun delta de avance
+  const calcularConsumoProyectado = (mat: MaterialActividad, nuevoAvance: number) => {
+    if (!avanceActividad) return 0
+    const deltaAvance = nuevoAvance - avanceActividad.avance_real
+    if (deltaAvance <= 0) return 0
+    const proporcional = (deltaAvance / 100) * mat.cantidad_estimada
+    const pendiente = mat.cantidad_estimada - mat.cantidad_consumida
+    return Math.min(proporcional, Math.max(0, pendiente))
+  }
+
+  // Cuando cambia el avance en el modal, recalcular los consumos proyectados como defaults
+  const handleAvanceChange = (nuevoVal: number) => {
+    const clamped = Math.min(100, Math.max(avanceActividad?.avance_real || 0, nuevoVal))
+    setAvanceNuevo(clamped)
+
+    // Recalcular consumos proyectados como default para cada material
+    const newConsumos: Record<number, number> = {}
+    avanceMateriales.forEach((mat) => {
+      const proyectado = calcularConsumoProyectado(mat, clamped)
+      newConsumos[mat.id] = Math.round(proyectado * 100) / 100
+    })
+    setConsumosReales(newConsumos)
+  }
+
+  const handleConfirmarAvance = async () => {
+    if (!avanceActividad || avanceNuevo <= avanceActividad.avance_real) return
 
     try {
-      setUpdatingAvance(actividadId)
-      await db.actividades.update(actividadId, { avance_real: nuevoAvance })
-      await loadActividades()
+      setConfirmandoAvance(true)
+
+      const consumos = avanceMateriales.map((mat) => ({
+        material_actividad_id: mat.id,
+        material_id: mat.material_id,
+        cantidad_consumir: consumosReales[mat.id] || 0
+      }))
+
+      const result = await db.actividades.confirmarAvance({
+        actividad_id: avanceActividad.id,
+        nuevo_avance: avanceNuevo,
+        consumos
+      })
+
+      // Mostrar advertencias si las hay
+      if (result.advertencias && result.advertencias.length > 0) {
+        showToast(
+          'Avance confirmado con advertencias',
+          'warning',
+          result.advertencias.join('. ')
+        )
+      } else if (avanceNuevo >= 100) {
+        showToast(
+          'Actividad completada al 100%',
+          'success',
+          'Los materiales consumidos han sido registrados.'
+        )
+      } else {
+        showToast(
+          `Avance actualizado a ${avanceNuevo}%`,
+          'success',
+          'El inventario se ha actualizado segun el consumo confirmado.'
+        )
+      }
 
       // Recalcular avance del proyecto
+      await loadActividades()
       const acts = await db.actividades.getByProyecto(Number(id))
       const avancePromedio = acts.reduce((sum, act) => sum + act.avance_real, 0) / acts.length
       await db.proyectos.update(Number(id), {
@@ -184,29 +252,20 @@ export default function ProyectoDetallePage() {
       await loadProyecto()
       await loadTodosMateriales()
 
-      // GENERAR ALERTAS AUTOMATICAMENTE
+      // Generar alertas
       await db.alertas.generar(Number(id))
 
-      if (nuevoAvance >= 100) {
-        showToast(
-          'Actividad completada al 100%',
-          'success',
-          'Los materiales han sido consumidos. Revise los materiales para confirmar el consumo final.'
-        )
-      } else if (nuevoAvance > actividad.avance_real) {
-        showToast(
-          `Avance actualizado a ${nuevoAvance}%`,
-          'info',
-          'El inventario se ha actualizado proporcionalmente.'
-        )
-      }
-    } catch (error) {
-      console.error('Error updating avance:', error)
-      showToast('Error al actualizar el avance', 'error')
+      setShowAvanceModal(false)
+      setAvanceActividad(null)
+    } catch (error: any) {
+      console.error('Error confirmando avance:', error)
+      showToast(error.message || 'Error al confirmar avance', 'error')
     } finally {
-      setUpdatingAvance(null)
+      setConfirmandoAvance(false)
     }
   }
+
+  // ==================== ACTIVIDADES CRUD ====================
 
   const handleSaveActividad = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -234,13 +293,15 @@ export default function ProyectoDetallePage() {
       setEditingActividad(null)
     } catch (error) {
       console.error('Error saving actividad:', error)
-      alert('Error al guardar la actividad')
+      showToast('Error al guardar la actividad', 'error')
     }
   }
 
+  // ==================== SIMULADOR ====================
+
   const handleSimular = async () => {
     if (!proyecto || avanceSimulado <= proyecto.avance_actual) {
-      alert('El avance simulado debe ser mayor al avance actual')
+      showToast('El avance simulado debe ser mayor al avance actual', 'warning')
       return
     }
 
@@ -250,7 +311,7 @@ export default function ProyectoDetallePage() {
       setSimulacion(resultado)
     } catch (error: any) {
       console.error('Error simulando:', error)
-      alert('Error al simular: ' + error.message)
+      showToast('Error al simular: ' + error.message, 'error')
     } finally {
       setSimulando(false)
     }
@@ -559,9 +620,6 @@ export default function ProyectoDetallePage() {
               <div className="space-y-4">
                 {actividades.map((actividad) => {
                   const isCompleta = actividad.avance_real >= 100
-                  const inputAvance = avanceInputs[actividad.id] ?? actividad.avance_real
-                  const hasChanged = inputAvance !== actividad.avance_real
-                  const isUpdating = updatingAvance === actividad.id
 
                   return (
                     <div
@@ -660,48 +718,19 @@ export default function ProyectoDetallePage() {
                         </div>
                       </div>
 
-                      {/* Control de avance: Input numerico + boton confirmar */}
+                      {/* Boton Reflejar Avance */}
                       {isCompleta ? (
                         <div className="bg-green-100 border border-green-300 rounded-lg p-3 text-center">
                           <p className="text-sm text-green-800 font-semibold">
-                            Actividad completada al 100%. Revise los materiales para confirmar el
+                            Actividad completada al 100%. Revise los materiales para verificar el
                             consumo final.
                           </p>
                         </div>
                       ) : (
-                        <div className="flex items-center gap-3 bg-gray-50 rounded-lg p-3">
-                          <label className="text-sm text-gray-600 font-medium whitespace-nowrap">
-                            Nuevo avance:
-                          </label>
-                          <input
-                            type="number"
-                            min={0}
-                            max={100}
-                            step="1"
-                            value={inputAvance}
-                            onChange={(e) => {
-                              const val = Math.min(
-                                100,
-                                Math.max(0, parseFloat(e.target.value) || 0)
-                              )
-                              setAvanceInputs((prev) => ({ ...prev, [actividad.id]: val }))
-                            }}
-                            className="w-20 px-3 py-2 border border-gray-300 rounded-lg text-center font-bold"
-                            disabled={isUpdating}
-                          />
-                          <span className="text-sm font-medium">%</span>
-                          <Button
-                            size="sm"
-                            onClick={() => handleConfirmAvance(actividad.id)}
-                            disabled={!hasChanged || isUpdating}
-                          >
-                            {isUpdating ? 'Actualizando...' : 'Actualizar Avance'}
+                        <div className="flex justify-center mt-2">
+                          <Button onClick={() => handleOpenAvanceModal(actividad)}>
+                            Reflejar Avance
                           </Button>
-                          {hasChanged && (
-                            <span className="text-xs text-blue-600 font-medium">
-                              {actividad.avance_real}% &rarr; {inputAvance}%
-                            </span>
-                          )}
                         </div>
                       )}
                     </div>
@@ -713,7 +742,7 @@ export default function ProyectoDetallePage() {
         </div>
       </div>
 
-      {/* Modal de Actividad */}
+      {/* Modal de Actividad (crear/editar) */}
       <Modal
         isOpen={showActividadModal}
         onClose={() => {
@@ -809,6 +838,205 @@ export default function ProyectoDetallePage() {
         </form>
       </Modal>
 
+      {/* ==================== MODAL REFLEJAR AVANCE ==================== */}
+      <Modal
+        isOpen={showAvanceModal}
+        onClose={() => {
+          setShowAvanceModal(false)
+          setAvanceActividad(null)
+        }}
+        title={`Reflejar Avance - ${avanceActividad?.nombre || ''}`}
+        size="xl"
+      >
+        {avanceActividad && (
+          <div className="space-y-5">
+            {/* Seccion: Porcentaje de Avance */}
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-5">
+              <h3 className="text-sm font-bold text-blue-800 mb-3">Nuevo Porcentaje de Avance</h3>
+              <div className="flex items-center gap-4">
+                <div className="text-center">
+                  <p className="text-xs text-gray-500 mb-1">Actual</p>
+                  <p className="text-2xl font-bold text-gray-600">{avanceActividad.avance_real}%</p>
+                </div>
+                <div className="text-2xl text-gray-400">&rarr;</div>
+                <div className="flex items-center gap-2 flex-1">
+                  <input
+                    type="number"
+                    min={avanceActividad.avance_real + 1}
+                    max={100}
+                    step="1"
+                    value={avanceNuevo}
+                    onChange={(e) =>
+                      handleAvanceChange(parseFloat(e.target.value) || avanceActividad.avance_real)
+                    }
+                    className="w-24 px-3 py-3 border-2 border-blue-300 rounded-lg text-center font-bold text-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <span className="font-bold text-lg">%</span>
+                </div>
+                <div className="text-center">
+                  <p className="text-xs text-gray-500 mb-1">Incremento</p>
+                  <p className={`text-lg font-bold ${avanceNuevo > avanceActividad.avance_real ? 'text-blue-700' : 'text-gray-400'}`}>
+                    +{Math.max(0, avanceNuevo - avanceActividad.avance_real)}%
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Seccion: Materiales */}
+            {avanceMateriales.length === 0 ? (
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-center">
+                <p className="text-sm text-yellow-800">
+                  Esta actividad no tiene materiales asignados. El avance se registrara sin consumo de materiales.
+                </p>
+              </div>
+            ) : (
+              <div>
+                <h3 className="text-sm font-bold text-gray-700 mb-3">
+                  Consumo de Materiales
+                </h3>
+                <div className="border border-gray-200 rounded-lg overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                          Material
+                        </th>
+                        <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">
+                          Stock Disp.
+                        </th>
+                        <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">
+                          Ya Consumido
+                        </th>
+                        <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">
+                          Proyectado
+                        </th>
+                        <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">
+                          Consumo Real
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200">
+                      {avanceMateriales.map((mat) => {
+                        const proyectado = calcularConsumoProyectado(mat, avanceNuevo)
+                        const consumoReal = consumosReales[mat.id] || 0
+                        const stockDisp = mat.stock_actual || 0
+                        const excedeLimite = consumoReal > (mat.cantidad_estimada - mat.cantidad_consumida)
+                        const excedeStock = consumoReal > stockDisp
+
+                        return (
+                          <tr key={mat.id} className="hover:bg-gray-50">
+                            <td className="px-4 py-3">
+                              <p className="font-medium text-gray-900">{mat.material_nombre}</p>
+                              <p className="text-xs text-gray-500">
+                                Estimado total: {mat.cantidad_estimada} {mat.unidad_abrev} |
+                                Pendiente: {(mat.cantidad_estimada - mat.cantidad_consumida).toFixed(2)}
+                              </p>
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              <span className={`font-semibold ${stockDisp <= 0 ? 'text-red-600' : 'text-gray-900'}`}>
+                                {stockDisp.toFixed(2)}
+                              </span>
+                              <p className="text-xs text-gray-500">{mat.unidad_abrev}</p>
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              <span className="text-gray-600">{mat.cantidad_consumida.toFixed(2)}</span>
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              <span className="text-blue-600 font-medium">
+                                {proyectado.toFixed(2)}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                value={consumoReal}
+                                onChange={(e) => {
+                                  const val = parseFloat(e.target.value) || 0
+                                  setConsumosReales((prev) => ({ ...prev, [mat.id]: val }))
+                                }}
+                                className={`w-24 px-2 py-1 border-2 rounded text-center text-sm font-semibold ${
+                                  excedeStock
+                                    ? 'border-red-400 bg-red-50 text-red-700'
+                                    : excedeLimite
+                                      ? 'border-orange-400 bg-orange-50 text-orange-700'
+                                      : 'border-gray-300'
+                                }`}
+                              />
+                              {excedeStock && (
+                                <p className="text-xs text-red-600 mt-1 font-medium">
+                                  Excede stock!
+                                </p>
+                              )}
+                              {excedeLimite && !excedeStock && (
+                                <p className="text-xs text-orange-600 mt-1">
+                                  Supera estimado (se ajustara)
+                                </p>
+                              )}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Leyenda */}
+                <div className="mt-3 space-y-1">
+                  <p className="text-xs text-gray-500">
+                    <strong>Proyectado:</strong> Consumo calculado proporcionalmente segun el incremento de avance (solo lectura).
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    <strong>Consumo Real:</strong> Cantidad que realmente se consumio. Editable para ajustar si difiere de la proyeccion.
+                  </p>
+                  <p className="text-xs text-orange-600">
+                    Si el consumo real supera la estimacion original, el sistema ajustara automaticamente la cantidad estimada.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Botones de accion */}
+            <div className="flex gap-3 pt-4 border-t border-gray-200">
+              <Button
+                className="flex-1"
+                onClick={handleConfirmarAvance}
+                disabled={
+                  confirmandoAvance ||
+                  avanceNuevo <= avanceActividad.avance_real ||
+                  avanceMateriales.some(
+                    (m) => (consumosReales[m.id] || 0) > (m.stock_actual || 0)
+                  )
+                }
+              >
+                {confirmandoAvance ? 'Confirmando...' : 'Confirmar Avance y Consumo'}
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setShowAvanceModal(false)
+                  setAvanceActividad(null)
+                }}
+              >
+                Cancelar
+              </Button>
+            </div>
+
+            {avanceMateriales.some(
+              (m) => (consumosReales[m.id] || 0) > (m.stock_actual || 0)
+            ) && (
+              <div className="bg-red-50 border border-red-300 rounded-lg p-3">
+                <p className="text-sm text-red-700 font-semibold">
+                  No se puede confirmar: uno o mas materiales tienen un consumo real que supera el stock disponible.
+                  Reduzca la cantidad o genere una orden de compra primero.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
+
       {/* MODAL DE MATERIALES DE ACTIVIDAD */}
       <Modal
         isOpen={showMaterialesModal}
@@ -861,6 +1089,9 @@ export default function ProyectoDetallePage() {
                       Material
                     </th>
                     <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">
+                      Stock Disp.
+                    </th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">
                       Cant. Estimada
                     </th>
                     <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">
@@ -887,6 +1118,11 @@ export default function ProyectoDetallePage() {
                         <td className="px-4 py-3">
                           <p className="font-medium text-gray-900">{ma.material_nombre}</p>
                           <p className="text-xs text-gray-500">{ma.unidad_abrev}</p>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <span className={`font-semibold text-sm ${(ma.stock_actual || 0) <= 0 ? 'text-red-600' : 'text-gray-700'}`}>
+                            {(ma.stock_actual || 0).toFixed(2)}
+                          </span>
                         </td>
                         <td className="px-4 py-3">
                           <input
@@ -949,7 +1185,7 @@ export default function ProyectoDetallePage() {
                 </tbody>
                 <tfoot className="bg-gray-50">
                   <tr>
-                    <td colSpan={4} className="px-4 py-3 text-right font-semibold text-gray-700">
+                    <td colSpan={5} className="px-4 py-3 text-right font-semibold text-gray-700">
                       Total Estimado:
                     </td>
                     <td className="px-4 py-3 text-center font-bold text-gray-900">
@@ -971,9 +1207,9 @@ export default function ProyectoDetallePage() {
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
             <p className="text-sm text-blue-800">
               <strong>Tip:</strong> La "Cantidad Estimada" es lo que se planea usar en total para
-              esta actividad. La "Cantidad Consumida" es lo que ya se ha usado. El sistema actualiza
-              el consumo automaticamente al avanzar la actividad. Los valores se guardan al salir
-              del campo (clic fuera del input).
+              esta actividad. Si durante la ejecucion necesita mas material del previsto, aumente la
+              cantidad estimada aqui. La "Cantidad Consumida" se actualiza automaticamente al usar
+              "Reflejar Avance". Los valores se guardan al salir del campo (clic fuera del input).
             </p>
           </div>
         </div>

@@ -163,4 +163,11 @@ export interface MaterialActividad {
   material_nombre?: string;
   precio_unitario?: number;
   unidad_abrev?: string;
+  stock_actual?: number;
+}
+
+export interface ConsumoConfirmacion {
+  material_actividad_id: number;
+  material_id: number;
+  cantidad_consumir: number;
 }

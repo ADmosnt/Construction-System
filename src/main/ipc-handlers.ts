@@ -241,68 +241,114 @@ export function registerIpcHandlers(): void {
   });
 
   ipcMain.handle('db:actividades:update', async (_, id: number, actividad: any) => {
+    // Actualizacion simple de campos de la actividad (sin consumo de materiales)
+    const actividadActual = dbHelpers.get<any>('SELECT * FROM actividades WHERE id = ?', [id]);
+    if (!actividadActual) throw new Error('Actividad no encontrada');
+
+    return dbHelpers.run(
+      `UPDATE actividades
+       SET avance_real = ?, fecha_inicio_real = ?, fecha_fin_real = ?,
+           nombre = ?, descripcion = ?, orden = ?,
+           avance_planificado = ?, fecha_inicio_planificada = ?, fecha_fin_planificada = ?
+       WHERE id = ?`,
+      [
+        actividad.avance_real !== undefined ? actividad.avance_real : actividadActual.avance_real,
+        actividad.fecha_inicio_real !== undefined ? actividad.fecha_inicio_real : actividadActual.fecha_inicio_real,
+        actividad.fecha_fin_real !== undefined ? actividad.fecha_fin_real : actividadActual.fecha_fin_real,
+        actividad.nombre !== undefined ? actividad.nombre : actividadActual.nombre,
+        actividad.descripcion !== undefined ? actividad.descripcion : actividadActual.descripcion,
+        actividad.orden !== undefined ? actividad.orden : actividadActual.orden,
+        actividad.avance_planificado !== undefined ? actividad.avance_planificado : actividadActual.avance_planificado,
+        actividad.fecha_inicio_planificada !== undefined ? actividad.fecha_inicio_planificada : actividadActual.fecha_inicio_planificada,
+        actividad.fecha_fin_planificada !== undefined ? actividad.fecha_fin_planificada : actividadActual.fecha_fin_planificada,
+        id
+      ]
+    );
+  });
+
+  // Confirmar avance con consumo explicito de materiales
+  ipcMain.handle('db:actividades:confirmarAvance', async (_, data: {
+    actividad_id: number;
+    nuevo_avance: number;
+    consumos: Array<{
+      material_actividad_id: number;
+      material_id: number;
+      cantidad_consumir: number;
+    }>;
+  }) => {
     return dbHelpers.transaction(() => {
-      // Obtener estado actual de la actividad
-      const actividadActual = dbHelpers.get<any>('SELECT * FROM actividades WHERE id = ?', [id]);
-      if (!actividadActual) throw new Error('Actividad no encontrada');
+      const actividad = dbHelpers.get<any>('SELECT * FROM actividades WHERE id = ?', [data.actividad_id]);
+      if (!actividad) throw new Error('Actividad no encontrada');
 
-      const avanceAnterior = actividadActual.avance_real || 0;
-      const avanceNuevo = actividad.avance_real !== undefined ? actividad.avance_real : avanceAnterior;
+      const avanceAnterior = actividad.avance_real || 0;
+      if (data.nuevo_avance <= avanceAnterior) {
+        throw new Error('El nuevo avance debe ser mayor al actual');
+      }
+      if (data.nuevo_avance > 100) {
+        throw new Error('El avance no puede superar el 100%');
+      }
 
-      // Actualizar la actividad (preservar campos no enviados)
+      // Actualizar avance de la actividad
       dbHelpers.run(
-        `UPDATE actividades
-         SET avance_real = ?, fecha_inicio_real = ?, fecha_fin_real = ?
-         WHERE id = ?`,
-        [
-          avanceNuevo,
-          actividad.fecha_inicio_real !== undefined ? actividad.fecha_inicio_real : actividadActual.fecha_inicio_real,
-          actividad.fecha_fin_real !== undefined ? actividad.fecha_fin_real : actividadActual.fecha_fin_real,
-          id
-        ]
+        'UPDATE actividades SET avance_real = ? WHERE id = ?',
+        [data.nuevo_avance, data.actividad_id]
       );
 
-      // Si el avance aumentó, consumir materiales proporcionalmente
-      const deltaAvance = avanceNuevo - avanceAnterior;
-      if (deltaAvance > 0) {
-        const materiales = dbHelpers.all<any>(
-          `SELECT ma.*, a.proyecto_id
-           FROM materiales_actividad ma
-           JOIN actividades a ON ma.actividad_id = a.id
-           WHERE ma.actividad_id = ?`,
-          [id]
+      // Procesar consumo de cada material
+      const advertencias: string[] = [];
+
+      for (const consumo of data.consumos) {
+        if (consumo.cantidad_consumir <= 0) continue;
+
+        // Verificar stock disponible
+        const material = dbHelpers.get<any>(
+          'SELECT id, nombre, stock_actual FROM materiales WHERE id = ?',
+          [consumo.material_id]
+        );
+        if (!material) continue;
+
+        // NO permitir consumir mas de lo que hay en stock
+        let cantidadFinal = consumo.cantidad_consumir;
+        if (cantidadFinal > material.stock_actual) {
+          cantidadFinal = Math.max(0, material.stock_actual);
+          if (cantidadFinal === 0) {
+            advertencias.push(`${material.nombre}: sin stock disponible, no se consumio`);
+            continue;
+          }
+          advertencias.push(`${material.nombre}: se ajusto a ${cantidadFinal.toFixed(2)} (stock insuficiente)`);
+        }
+
+        // Crear movimiento de salida (trigger actualiza stock_actual)
+        dbHelpers.run(
+          `INSERT INTO movimientos_inventario (material_id, proyecto_id, tipo, cantidad, motivo, responsable)
+           VALUES (?, ?, 'salida', ?, ?, 'Sistema')`,
+          [
+            consumo.material_id,
+            actividad.proyecto_id,
+            cantidadFinal,
+            `Consumo confirmado por avance (${avanceAnterior}% → ${data.nuevo_avance}%)`
+          ]
         );
 
-        for (const mat of materiales) {
-          // Calcular consumo proporcional al incremento de avance
-          const consumoProporcional = (deltaAvance / 100) * mat.cantidad_estimada;
-          // No consumir más de lo pendiente
-          const pendiente = mat.cantidad_estimada - mat.cantidad_consumida;
-          const consumoReal = Math.min(consumoProporcional, Math.max(0, pendiente));
+        // Actualizar cantidad_consumida
+        const matAct = dbHelpers.get<any>(
+          'SELECT * FROM materiales_actividad WHERE id = ?',
+          [consumo.material_actividad_id]
+        );
 
-          if (consumoReal > 0) {
-            // Crear movimiento de salida (el trigger de la BD actualiza stock_actual)
-            dbHelpers.run(
-              `INSERT INTO movimientos_inventario (material_id, proyecto_id, tipo, cantidad, motivo, responsable)
-               VALUES (?, ?, 'salida', ?, ?, 'Sistema')`,
-              [
-                mat.material_id,
-                mat.proyecto_id,
-                consumoReal,
-                `Consumo por avance de actividad (${avanceAnterior}% → ${avanceNuevo}%)`
-              ]
-            );
+        if (matAct) {
+          const nuevaConsumida = matAct.cantidad_consumida + cantidadFinal;
+          // Si el consumo real supera la estimacion, auto-ajustar la estimacion
+          const nuevaEstimada = Math.max(matAct.cantidad_estimada, nuevaConsumida);
 
-            // Actualizar cantidad consumida en materiales_actividad
-            dbHelpers.run(
-              `UPDATE materiales_actividad SET cantidad_consumida = cantidad_consumida + ? WHERE id = ?`,
-              [consumoReal, mat.id]
-            );
-          }
+          dbHelpers.run(
+            'UPDATE materiales_actividad SET cantidad_consumida = ?, cantidad_estimada = ? WHERE id = ?',
+            [nuevaConsumida, nuevaEstimada, consumo.material_actividad_id]
+          );
         }
       }
 
-      return { success: true };
+      return { success: true, advertencias };
     });
   });
 
@@ -535,10 +581,11 @@ export function registerIpcHandlers(): void {
   
   ipcMain.handle('db:actividades:getMateriales', async (_, actividadId: number) => {
     return dbHelpers.all(`
-      SELECT 
+      SELECT
         ma.*,
         m.nombre as material_nombre,
         m.precio_unitario,
+        m.stock_actual,
         u.abreviatura as unidad_abrev
       FROM materiales_actividad ma
       JOIN materiales m ON ma.material_id = m.id
