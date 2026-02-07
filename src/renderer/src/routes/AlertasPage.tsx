@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import Header from '../components/layout/Header';
 import { showToast } from '../components/ui/Toast';
 import Button from '../components/ui/Button';
+import Modal from '../components/ui/Modal';
 import { db } from '../lib/database';
 import type { Alerta } from '../types';
 
@@ -13,6 +14,8 @@ export default function AlertasPage() {
   const [alertas, setAlertas] = useState<Alerta[]>([]);
   const [loading, setLoading] = useState(true);
   const [filtro, setFiltro] = useState<'todas' | 'critica' | 'alta' | 'media' | 'baja'>('todas');
+  const [showCriticidadModal, setShowCriticidadModal] = useState(false);
+  const [showDesabastecimientoModal, setShowDesabastecimientoModal] = useState(false);
 
   useEffect(() => {
     loadAlertas();
@@ -77,11 +80,11 @@ export default function AlertasPage() {
 
   const getIconoTipo = (tipo: string) => {
     const iconos = {
-      'stock_minimo': '⚠️',
-      'desabastecimiento_inminente': '🚨',
-      'reorden_sugerido': '📦'
+      'stock_minimo': '\u26A0\uFE0F',
+      'desabastecimiento_inminente': '\uD83D\uDEA8',
+      'reorden_sugerido': '\uD83D\uDCE6'
     };
-    return iconos[tipo as keyof typeof iconos] || '📌';
+    return iconos[tipo as keyof typeof iconos] || '\uD83D\uDCCC';
   };
 
   if (loading) {
@@ -97,120 +100,22 @@ export default function AlertasPage() {
 
   return (
     <div>
-      <Header 
-        title="Alertas" 
+      <Header
+        title="Alertas"
         subtitle={`${alertas.length} alertas pendientes`}
+        action={
+          <div className="flex gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setShowCriticidadModal(true)}>
+              ? Niveles de Criticidad
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setShowDesabastecimientoModal(true)}>
+              ? Calculo de Desabastecimiento
+            </Button>
+          </div>
+        }
       />
 
       <div className="p-8">
-        {/* Paneles de Explicacion */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-          {/* Panel: Niveles de Criticidad */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h3 className="text-lg font-bold text-gray-900 mb-3">Niveles de Criticidad</h3>
-            <p className="text-sm text-gray-600 mb-4">
-              El nivel se determina comparando los dias estimados de stock restante contra el tiempo de entrega del proveedor:
-            </p>
-            <div className="space-y-3">
-              <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-lg p-3">
-                <span className="text-xl">🔴</span>
-                <div>
-                  <p className="font-bold text-red-700 text-sm">CRITICA</p>
-                  <p className="text-xs text-red-600">
-                    Los dias de stock restante son <strong>menores o iguales</strong> al tiempo de entrega del proveedor.
-                    No hay tiempo para esperar una entrega: el material se agotara antes de que llegue el pedido.
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-start gap-3 bg-orange-50 border border-orange-200 rounded-lg p-3">
-                <span className="text-xl">🟠</span>
-                <div>
-                  <p className="font-bold text-orange-700 text-sm">ALTA</p>
-                  <p className="text-xs text-orange-600">
-                    Los dias de stock restante superan el tiempo de entrega por un margen reducido (hasta 3 dias para materiales criticos, 6 para normales).
-                    Hay poco margen de seguridad.
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-start gap-3 bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-                <span className="text-xl">🟡</span>
-                <div>
-                  <p className="font-bold text-yellow-700 text-sm">MEDIA</p>
-                  <p className="text-xs text-yellow-600">
-                    El stock esta por debajo del minimo, pero aun hay margen suficiente (hasta 7 dias para materiales criticos, 14 para normales)
-                    para gestionar un reabastecimiento sin urgencia extrema.
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-start gap-3 bg-blue-50 border border-blue-200 rounded-lg p-3">
-                <span className="text-xl">🔵</span>
-                <div>
-                  <p className="font-bold text-blue-700 text-sm">BAJA</p>
-                  <p className="text-xs text-blue-600">
-                    El stock esta bajo el minimo pero hay suficiente margen temporal. Se recomienda planificar un pedido preventivo
-                    sin urgencia inmediata.
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Panel: Calculo de Dias de Desabastecimiento */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h3 className="text-lg font-bold text-gray-900 mb-3">Dias hasta Desabastecimiento</h3>
-            <p className="text-sm text-gray-600 mb-4">
-              El sistema calcula cuantos dias durara el stock actual basandose en el consumo proyectado de las actividades:
-            </p>
-            <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-4">
-              <p className="text-sm font-mono text-gray-800 mb-2">
-                <strong>Formula:</strong>
-              </p>
-              <div className="bg-white rounded p-3 border text-center">
-                <p className="text-sm font-mono">
-                  Dias = Stock Actual / Tasa de Consumo Diaria
-                </p>
-              </div>
-              <p className="text-xs text-gray-600 mt-3">
-                Donde la <strong>Tasa de Consumo Diaria</strong> se calcula como:
-              </p>
-              <div className="bg-white rounded p-3 border text-center mt-2">
-                <p className="text-sm font-mono">
-                  Tasa = Consumo Pendiente Total / Dias Restantes del Proyecto
-                </p>
-              </div>
-            </div>
-            <div className="space-y-2">
-              <div className="flex items-start gap-2">
-                <span className="text-blue-500 font-bold text-sm">1.</span>
-                <p className="text-xs text-gray-700">
-                  <strong>Consumo Pendiente:</strong> Se suman las cantidades pendientes (estimada - consumida) de todas las actividades
-                  no completadas que usan ese material, ponderadas por el porcentaje de avance restante.
-                </p>
-              </div>
-              <div className="flex items-start gap-2">
-                <span className="text-blue-500 font-bold text-sm">2.</span>
-                <p className="text-xs text-gray-700">
-                  <strong>Dias Restantes:</strong> Se calculan desde la fecha actual hasta la fecha de fin estimada del proyecto.
-                </p>
-              </div>
-              <div className="flex items-start gap-2">
-                <span className="text-blue-500 font-bold text-sm">3.</span>
-                <p className="text-xs text-gray-700">
-                  <strong>Resultado:</strong> Si no hay consumo pendiente, se asume que el stock durara todos los dias restantes.
-                  Si el stock es 0, los dias son 0 (desabastecimiento inmediato).
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-4 bg-purple-50 border border-purple-200 rounded-lg p-3">
-              <p className="text-xs text-purple-800">
-                <strong>Fecha sugerida de pedido:</strong> Se resta el tiempo de entrega del proveedor (mas un margen de seguridad de 2 dias)
-                a los dias estimados de stock. Esto indica la fecha limite para realizar el pedido y evitar desabastecimiento.
-              </p>
-            </div>
-          </div>
-        </div>
-
         {/* Filtros y Stats */}
         <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
           <button
@@ -392,6 +297,121 @@ export default function AlertasPage() {
           </div>
         )}
       </div>
+
+      {/* Modal: Niveles de Criticidad */}
+      <Modal
+        isOpen={showCriticidadModal}
+        onClose={() => setShowCriticidadModal(false)}
+        title="Niveles de Criticidad"
+        size="lg"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600">
+            El nivel se determina comparando los dias estimados de stock restante contra el tiempo de entrega del proveedor:
+          </p>
+          <div className="space-y-3">
+            <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-lg p-4">
+              <span className="text-2xl">🔴</span>
+              <div>
+                <p className="font-bold text-red-700">CRITICA</p>
+                <p className="text-sm text-red-600">
+                  Los dias de stock restante son <strong>menores o iguales</strong> al tiempo de entrega del proveedor.
+                  No hay tiempo para esperar una entrega: el material se agotara antes de que llegue el pedido.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-start gap-3 bg-orange-50 border border-orange-200 rounded-lg p-4">
+              <span className="text-2xl">🟠</span>
+              <div>
+                <p className="font-bold text-orange-700">ALTA</p>
+                <p className="text-sm text-orange-600">
+                  Los dias de stock restante superan el tiempo de entrega por un margen reducido (hasta 3 dias para materiales criticos, 6 para normales).
+                  Hay poco margen de seguridad.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-start gap-3 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+              <span className="text-2xl">🟡</span>
+              <div>
+                <p className="font-bold text-yellow-700">MEDIA</p>
+                <p className="text-sm text-yellow-600">
+                  El stock esta por debajo del minimo, pero aun hay margen suficiente (hasta 7 dias para materiales criticos, 14 para normales)
+                  para gestionar un reabastecimiento sin urgencia extrema.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-start gap-3 bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <span className="text-2xl">🔵</span>
+              <div>
+                <p className="font-bold text-blue-700">BAJA</p>
+                <p className="text-sm text-blue-600">
+                  El stock esta bajo el minimo pero hay suficiente margen temporal. Se recomienda planificar un pedido preventivo
+                  sin urgencia inmediata.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal: Calculo de Desabastecimiento */}
+      <Modal
+        isOpen={showDesabastecimientoModal}
+        onClose={() => setShowDesabastecimientoModal(false)}
+        title="Dias hasta Desabastecimiento"
+        size="lg"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600">
+            El sistema calcula cuantos dias durara el stock actual basandose en el consumo proyectado de las actividades:
+          </p>
+          <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+            <p className="text-sm font-semibold text-gray-800 mb-2">Formula:</p>
+            <div className="bg-white rounded p-3 border text-center">
+              <p className="text-sm font-mono">
+                Dias = Stock Actual / Tasa de Consumo Diaria
+              </p>
+            </div>
+            <p className="text-sm text-gray-600 mt-3">
+              Donde la <strong>Tasa de Consumo Diaria</strong> se calcula como:
+            </p>
+            <div className="bg-white rounded p-3 border text-center mt-2">
+              <p className="text-sm font-mono">
+                Tasa = Consumo Pendiente Total / Dias Restantes del Proyecto
+              </p>
+            </div>
+          </div>
+          <div className="space-y-3">
+            <div className="flex items-start gap-2">
+              <span className="text-blue-500 font-bold">1.</span>
+              <p className="text-sm text-gray-700">
+                <strong>Consumo Pendiente:</strong> Se suman las cantidades pendientes (estimada - consumida) de todas las actividades
+                no completadas que usan ese material, ponderadas por el porcentaje de avance restante.
+              </p>
+            </div>
+            <div className="flex items-start gap-2">
+              <span className="text-blue-500 font-bold">2.</span>
+              <p className="text-sm text-gray-700">
+                <strong>Dias Restantes:</strong> Se calculan desde la fecha actual hasta la fecha de fin estimada del proyecto.
+              </p>
+            </div>
+            <div className="flex items-start gap-2">
+              <span className="text-blue-500 font-bold">3.</span>
+              <p className="text-sm text-gray-700">
+                <strong>Resultado:</strong> Si no hay consumo pendiente, se asume que el stock durara todos los dias restantes.
+                Si el stock es 0, los dias son 0 (desabastecimiento inmediato).
+              </p>
+            </div>
+          </div>
+
+          <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
+            <p className="text-sm text-purple-800">
+              <strong>Fecha sugerida de pedido:</strong> Se resta el tiempo de entrega del proveedor (mas un margen de seguridad de 2 dias)
+              a los dias estimados de stock. Esto indica la fecha limite para realizar el pedido y evitar desabastecimiento.
+            </p>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

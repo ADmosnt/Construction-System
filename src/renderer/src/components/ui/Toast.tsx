@@ -26,7 +26,7 @@ export default function ToastContainer() {
     setToasts((prev) => [...prev, toast])
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== toast.id))
-    }, 6000)
+    }, 10000)
   }, [])
 
   useEffect(() => {
@@ -87,9 +87,10 @@ export default function ToastContainer() {
             </div>
             <button
               onClick={() => removeToast(toast.id)}
-              className="text-gray-400 hover:text-gray-600 flex-shrink-0"
+              className="text-gray-500 hover:text-gray-800 flex-shrink-0 ml-2 p-1 rounded hover:bg-black/10 transition-colors text-base leading-none font-bold"
+              title="Cerrar notificacion"
             >
-              \u2715
+              &times;
             </button>
           </div>
         </div>
