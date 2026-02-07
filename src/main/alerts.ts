@@ -269,19 +269,26 @@ function generarAlertasStockEstancado(): number {
     dias_sin_movimiento: number;
     valor_parado: number;
   }>(`
-    SELECT
-      m.id,
-      m.nombre,
-      m.stock_actual,
-      (SELECT MAX(fecha) FROM movimientos_inventario WHERE material_id = m.id) as ultimo_movimiento,
-      CAST(julianday('now') - julianday(COALESCE(
-        (SELECT MAX(fecha) FROM movimientos_inventario WHERE material_id = m.id),
+    WITH materiales_movimiento AS (
+      SELECT
+        m.id,
+        m.nombre,
+        m.stock_actual,
+        m.precio_unitario,
+        (SELECT MAX(fecha) FROM movimientos_inventario WHERE material_id = m.id) as ultimo_movimiento,
         m.created_at
-      )) AS INTEGER) as dias_sin_movimiento,
-      m.stock_actual * m.precio_unitario as valor_parado
-    FROM materiales m
-    WHERE m.stock_actual > 0
-    HAVING dias_sin_movimiento >= ${DIAS_ESTANCAMIENTO}
+      FROM materiales m
+      WHERE m.stock_actual > 0
+    )
+    SELECT
+      id,
+      nombre,
+      stock_actual,
+      ultimo_movimiento,
+      CAST(julianday('now') - julianday(COALESCE(ultimo_movimiento, created_at)) AS INTEGER) as dias_sin_movimiento,
+      stock_actual * precio_unitario as valor_parado
+    FROM materiales_movimiento
+    WHERE CAST(julianday('now') - julianday(COALESCE(ultimo_movimiento, created_at)) AS INTEGER) >= ${DIAS_ESTANCAMIENTO}
   `);
 
   for (const m of materiales) {

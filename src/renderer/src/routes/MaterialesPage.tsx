@@ -20,7 +20,7 @@ export default function MaterialesPage() {
   const [editingMaterial, setEditingMaterial] = useState<Material | null>(null);
   const [selectedMaterial, setSelectedMaterial] = useState<Material | null>(null);
   const [movimientos, setMovimientos] = useState<MovimientoInventario[]>([]);
-  const [filtro, setFiltro] = useState<'todos' | 'criticos' | 'bajos'>('todos');
+  const [filtro, setFiltro] = useState<'todos' | 'criticos' | 'bajos' | 'perecederos'>('todos');
 
   useEffect(() => {
     loadData();
@@ -48,6 +48,7 @@ export default function MaterialesPage() {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
 
+    const esPerecedero = formData.get('es_perecedero') === 'true';
     const materialData = {
       nombre: formData.get('nombre') as string,
       descripcion: formData.get('descripcion') as string,
@@ -57,7 +58,10 @@ export default function MaterialesPage() {
       stock_minimo: parseFloat(formData.get('stock_minimo') as string),
       stock_maximo: parseFloat(formData.get('stock_maximo') as string),
       precio_unitario: parseFloat(formData.get('precio_unitario') as string),
-      es_critico: formData.get('es_critico') === 'true'
+      es_critico: formData.get('es_critico') === 'true',
+      es_perecedero: esPerecedero,
+      fecha_vencimiento: esPerecedero ? (formData.get('fecha_vencimiento') as string) || null : null,
+      dias_aviso_vencimiento: esPerecedero ? parseInt(formData.get('dias_aviso_vencimiento') as string) || 15 : 15
     };
 
     try {
@@ -117,6 +121,7 @@ export default function MaterialesPage() {
   const materialesFiltrados = materiales.filter(m => {
     if (filtro === 'criticos') return m.es_critico;
     if (filtro === 'bajos') return m.stock_actual < m.stock_minimo;
+    if (filtro === 'perecederos') return m.es_perecedero;
     return true;
   });
 
@@ -181,6 +186,16 @@ export default function MaterialesPage() {
             >
               Stock Bajo ({materiales.filter(m => m.stock_actual < m.stock_minimo).length})
             </button>
+            <button
+              onClick={() => setFiltro('perecederos')}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                filtro === 'perecederos'
+                  ? 'bg-orange-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              Perecederos ({materiales.filter(m => m.es_perecedero).length})
+            </button>
           </div>
         </div>
 
@@ -195,6 +210,7 @@ export default function MaterialesPage() {
                   <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">Stock Mínimo</th>
                   <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">Stock Máximo</th>
                   <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">Estado</th>
+                  <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">Caducidad</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Proveedor</th>
                   <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">Precio</th>
                   <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">Acciones</th>
@@ -233,6 +249,33 @@ export default function MaterialesPage() {
                         <span className={`px-2 py-1 text-xs font-semibold rounded-full ${colorEstado}`}>
                           {estado}
                         </span>
+                      </td>
+                      <td className="px-6 py-4 text-center">
+                        {material.es_perecedero ? (() => {
+                          if (!material.fecha_vencimiento) {
+                            return <span className="text-xs text-orange-500">Perecedero (sin fecha)</span>;
+                          }
+                          const diasRestantes = Math.ceil(
+                            (new Date(material.fecha_vencimiento).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
+                          );
+                          if (diasRestantes < 0) {
+                            return <span className="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-700">VENCIDO</span>;
+                          }
+                          if (diasRestantes <= (material.dias_aviso_vencimiento || 15)) {
+                            return (
+                              <span className="px-2 py-1 text-xs font-semibold rounded-full bg-orange-100 text-orange-700">
+                                Vence en {diasRestantes}d
+                              </span>
+                            );
+                          }
+                          return (
+                            <span className="text-xs text-gray-500">
+                              {new Date(material.fecha_vencimiento).toLocaleDateString()}
+                            </span>
+                          );
+                        })() : (
+                          <span className="text-xs text-gray-400">-</span>
+                        )}
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-900">
                         {material.proveedor_nombre || 'N/A'}
@@ -384,7 +427,7 @@ export default function MaterialesPage() {
               defaultValue={editingMaterial?.precio_unitario || 0}
             />
 
-            <div>
+            <div className="flex items-center gap-6">
               <label className="flex items-center gap-2">
                 <input
                   type="checkbox"
@@ -394,9 +437,61 @@ export default function MaterialesPage() {
                   className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                 />
                 <span className="text-sm font-medium text-gray-700">
-                  Material Crítico (prioridad alta en alertas)
+                  Material Crítico
                 </span>
               </label>
+
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  name="es_perecedero"
+                  value="true"
+                  defaultChecked={editingMaterial?.es_perecedero}
+                  className="rounded border-gray-300 text-orange-600 focus:ring-orange-500"
+                  onChange={(e) => {
+                    const panel = document.getElementById('perecedero-fields');
+                    if (panel) panel.style.display = e.target.checked ? 'grid' : 'none';
+                  }}
+                />
+                <span className="text-sm font-medium text-gray-700">
+                  Material Perecedero
+                </span>
+              </label>
+            </div>
+
+            <div
+              id="perecedero-fields"
+              className="grid grid-cols-2 gap-4 p-4 bg-orange-50 border border-orange-200 rounded-lg"
+              style={{ display: editingMaterial?.es_perecedero ? 'grid' : 'none' }}
+            >
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Fecha de Vencimiento
+                </label>
+                <input
+                  type="date"
+                  name="fecha_vencimiento"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  defaultValue={editingMaterial?.fecha_vencimiento || ''}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Días de aviso antes del vencimiento
+                </label>
+                <input
+                  type="number"
+                  name="dias_aviso_vencimiento"
+                  min="1"
+                  max="365"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  defaultValue={editingMaterial?.dias_aviso_vencimiento || 15}
+                  placeholder="15"
+                />
+              </div>
+              <p className="col-span-2 text-xs text-orange-600">
+                El sistema generará alertas cuando el material esté próximo a vencer según los días configurados.
+              </p>
             </div>
           </div>
 

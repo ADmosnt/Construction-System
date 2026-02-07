@@ -98,9 +98,10 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('db:materiales:create', async (_, material: any) => {
     const result = dbHelpers.run(
-      `INSERT INTO materiales (nombre, descripcion, unidad_medida_id, proveedor_id, 
-                               stock_actual, stock_minimo, stock_maximo, precio_unitario, es_critico)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO materiales (nombre, descripcion, unidad_medida_id, proveedor_id,
+                               stock_actual, stock_minimo, stock_maximo, precio_unitario, es_critico,
+                               es_perecedero, fecha_vencimiento, dias_aviso_vencimiento)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         material.nombre,
         material.descripcion,
@@ -110,7 +111,10 @@ export function registerIpcHandlers(): void {
         material.stock_minimo || 0,
         material.stock_maximo || 0,
         material.precio_unitario || 0,
-        material.es_critico ? 1 : 0
+        material.es_critico ? 1 : 0,
+        material.es_perecedero ? 1 : 0,
+        material.fecha_vencimiento || null,
+        material.dias_aviso_vencimiento || 15
       ]
     );
     return { id: result.lastInsertRowid };
@@ -118,9 +122,10 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('db:materiales:update', async (_, id: number, material: any) => {
     return dbHelpers.run(
-      `UPDATE materiales 
+      `UPDATE materiales
        SET nombre = ?, descripcion = ?, unidad_medida_id = ?, proveedor_id = ?,
-           stock_actual = ?, stock_minimo = ?, stock_maximo = ?, precio_unitario = ?, es_critico = ?
+           stock_actual = ?, stock_minimo = ?, stock_maximo = ?, precio_unitario = ?, es_critico = ?,
+           es_perecedero = ?, fecha_vencimiento = ?, dias_aviso_vencimiento = ?
        WHERE id = ?`,
       [
         material.nombre,
@@ -132,6 +137,9 @@ export function registerIpcHandlers(): void {
         material.stock_maximo,
         material.precio_unitario,
         material.es_critico ? 1 : 0,
+        material.es_perecedero ? 1 : 0,
+        material.fecha_vencimiento || null,
+        material.dias_aviso_vencimiento || 15,
         id
       ]
     );
