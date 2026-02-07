@@ -6,6 +6,7 @@ import Header from '../components/layout/Header';
 import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
 import Input from '../components/ui/Input';
+import { showToast } from '../components/ui/Toast';
 import { db } from '../lib/database';
 import type { Proyecto } from '../types';
 
@@ -59,14 +60,16 @@ export default function ProyectosPage() {
     try {
       if (editingProyecto) {
         await db.proyectos.update(editingProyecto.id, proyectoData);
+        showToast('Proyecto actualizado', 'success');
       } else {
         await db.proyectos.create(proyectoData);
+        showToast('Proyecto creado exitosamente', 'success');
       }
       await loadProyectos();
       handleCloseModal();
     } catch (error) {
       console.error('Error saving proyecto:', error);
-      alert('Error al guardar el proyecto');
+      showToast('Error al guardar el proyecto', 'error');
     }
   };
 
@@ -76,9 +79,10 @@ export default function ProyectosPage() {
     try {
       await db.proyectos.delete(id);
       await loadProyectos();
+      showToast('Proyecto eliminado', 'info');
     } catch (error) {
       console.error('Error deleting proyecto:', error);
-      alert('Error al eliminar el proyecto');
+      showToast('Error al eliminar el proyecto', 'error');
     }
   };
 

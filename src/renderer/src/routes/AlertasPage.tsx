@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Header from '../components/layout/Header';
+import { showToast } from '../components/ui/Toast';
 import Button from '../components/ui/Button';
 import { db } from '../lib/database';
 import type { Alerta } from '../types';
@@ -32,8 +33,10 @@ export default function AlertasPage() {
     try {
       await db.alertas.marcarAtendida(id);
       await loadAlertas();
+      showToast('Alerta marcada como atendida', 'success');
     } catch (error) {
       console.error('Error marking alerta:', error);
+      showToast('Error al marcar la alerta', 'error');
     }
   };
 

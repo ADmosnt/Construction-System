@@ -296,13 +296,20 @@ export function registerIpcHandlers(): void {
 
       // Procesar consumo de cada material
       const advertencias: string[] = [];
+      const estadosMateriales: Array<{
+        nombre: string;
+        stock_actual: number;
+        stock_minimo: number;
+        nivel: 'critico' | 'bajo' | 'normal';
+        consumido: number;
+      }> = [];
 
       for (const consumo of data.consumos) {
         if (consumo.cantidad_consumir <= 0) continue;
 
         // Verificar stock disponible
         const material = dbHelpers.get<any>(
-          'SELECT id, nombre, stock_actual FROM materiales WHERE id = ?',
+          'SELECT id, nombre, stock_actual, stock_minimo FROM materiales WHERE id = ?',
           [consumo.material_id]
         );
         if (!material) continue;
@@ -346,9 +353,34 @@ export function registerIpcHandlers(): void {
             [nuevaConsumida, nuevaEstimada, consumo.material_actividad_id]
           );
         }
+
+        // Leer stock actualizado (post-trigger) para reportar nivel
+        const matPostConsumo = dbHelpers.get<any>(
+          'SELECT stock_actual, stock_minimo FROM materiales WHERE id = ?',
+          [consumo.material_id]
+        );
+
+        if (matPostConsumo) {
+          let nivel: 'critico' | 'bajo' | 'normal' = 'normal';
+          if (matPostConsumo.stock_actual <= 0 || matPostConsumo.stock_actual < matPostConsumo.stock_minimo * 0.5) {
+            nivel = 'critico';
+          } else if (matPostConsumo.stock_actual < matPostConsumo.stock_minimo) {
+            nivel = 'bajo';
+          }
+
+          if (nivel !== 'normal') {
+            estadosMateriales.push({
+              nombre: material.nombre,
+              stock_actual: matPostConsumo.stock_actual,
+              stock_minimo: matPostConsumo.stock_minimo,
+              nivel,
+              consumido: cantidadFinal
+            });
+          }
+        }
       }
 
-      return { success: true, advertencias };
+      return { success: true, advertencias, estadosMateriales };
     });
   });
 

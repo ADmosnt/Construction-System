@@ -105,11 +105,14 @@ export default function ProyectoDetallePage() {
     if (!selectedActividad) return
 
     const formData = new FormData(e.currentTarget)
+    const materialId = parseInt(formData.get('material_id') as string)
+    const cantidadEstimada = parseFloat(formData.get('cantidad_estimada') as string)
+
     try {
       await db.actividades.addMaterial({
         actividad_id: selectedActividad.id,
-        material_id: parseInt(formData.get('material_id') as string),
-        cantidad_estimada: parseFloat(formData.get('cantidad_estimada') as string),
+        material_id: materialId,
+        cantidad_estimada: cantidadEstimada,
         cantidad_consumida: 0
       })
 
@@ -118,6 +121,25 @@ export default function ProyectoDetallePage() {
       await loadTodosMateriales()
       setShowAddMaterialModal(false)
       showToast('Material asignado a la actividad', 'success')
+
+      // Verificar si el stock quedaria por debajo del minimo al consumir lo estimado
+      const mat = todosMateriales.find((m) => m.id === materialId)
+      if (mat) {
+        const stockDespues = mat.stock_actual - cantidadEstimada
+        if (stockDespues <= 0) {
+          showToast(
+            `${mat.nombre}: stock insuficiente para cubrir la estimacion`,
+            'error',
+            `Stock actual: ${mat.stock_actual.toFixed(2)} ${mat.unidad_abrev}. Al consumir ${cantidadEstimada} quedarian ${stockDespues.toFixed(2)}. Genere una orden de compra.`
+          )
+        } else if (stockDespues < mat.stock_minimo) {
+          showToast(
+            `${mat.nombre}: el stock bajara del minimo`,
+            'warning',
+            `Stock actual: ${mat.stock_actual.toFixed(2)}, minimo: ${mat.stock_minimo.toFixed(2)}. Al consumir ${cantidadEstimada} quedarian ${stockDespues.toFixed(2)} ${mat.unidad_abrev}. Se recomienda generar una orden de compra.`
+          )
+        }
+      }
     } catch (error: any) {
       console.error('Error adding material:', error)
       showToast(error.message || 'Error al agregar material', 'error')
@@ -139,8 +161,10 @@ export default function ProyectoDetallePage() {
         const mats = await db.actividades.getMateriales(selectedActividad.id)
         setMaterialesActividad(mats)
       }
+      showToast('Material actualizado', 'info')
     } catch (error) {
       console.error('Error updating material:', error)
+      showToast('Error al actualizar material', 'error')
     }
   }
 
@@ -154,8 +178,10 @@ export default function ProyectoDetallePage() {
         const mats = await db.actividades.getMateriales(selectedActividad.id)
         setMaterialesActividad(mats)
       }
+      showToast('Material eliminado de la actividad', 'info')
     } catch (error) {
       console.error('Error removing material:', error)
+      showToast('Error al eliminar material', 'error')
     }
   }
 
@@ -221,14 +247,8 @@ export default function ProyectoDetallePage() {
         consumos
       })
 
-      // Mostrar advertencias si las hay
-      if (result.advertencias && result.advertencias.length > 0) {
-        showToast(
-          'Avance confirmado con advertencias',
-          'warning',
-          result.advertencias.join('. ')
-        )
-      } else if (avanceNuevo >= 100) {
+      // Toast de exito del avance
+      if (avanceNuevo >= 100) {
         showToast(
           'Actividad completada al 100%',
           'success',
@@ -240,6 +260,32 @@ export default function ProyectoDetallePage() {
           'success',
           'El inventario se ha actualizado segun el consumo confirmado.'
         )
+      }
+
+      // Mostrar advertencias de ajuste de stock si las hay
+      if (result.advertencias && result.advertencias.length > 0) {
+        for (const adv of result.advertencias) {
+          showToast('Advertencia de stock', 'warning', adv)
+        }
+      }
+
+      // Notificaciones individuales por material que alcanzo un nivel de criticidad
+      if (result.estadosMateriales && result.estadosMateriales.length > 0) {
+        for (const mat of result.estadosMateriales) {
+          if (mat.nivel === 'critico') {
+            showToast(
+              `${mat.nombre}: nivel CRITICO de stock`,
+              'error',
+              `Stock actual: ${mat.stock_actual.toFixed(2)} (minimo: ${mat.stock_minimo.toFixed(2)}). Genere una orden de compra urgente.`
+            )
+          } else if (mat.nivel === 'bajo') {
+            showToast(
+              `${mat.nombre}: nivel BAJO de stock`,
+              'warning',
+              `Stock actual: ${mat.stock_actual.toFixed(2)} (minimo: ${mat.stock_minimo.toFixed(2)}). Se recomienda generar una orden de compra.`
+            )
+          }
+        }
       }
 
       // Recalcular avance del proyecto
@@ -285,8 +331,10 @@ export default function ProyectoDetallePage() {
     try {
       if (editingActividad) {
         await db.actividades.update(editingActividad.id, actividadData)
+        showToast('Actividad actualizada', 'success')
       } else {
         await db.actividades.create(actividadData)
+        showToast('Actividad creada exitosamente', 'success')
       }
       await loadActividades()
       setShowActividadModal(false)

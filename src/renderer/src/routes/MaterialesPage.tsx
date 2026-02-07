@@ -5,6 +5,7 @@ import Header from '../components/layout/Header';
 import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
 import Input from '../components/ui/Input';
+import { showToast } from '../components/ui/Toast';
 import { db } from '../lib/database';
 import type { Material, Proveedor, UnidadMedida, MovimientoInventario } from '../types';
 
@@ -62,15 +63,17 @@ export default function MaterialesPage() {
     try {
       if (editingMaterial) {
         await db.materiales.update(editingMaterial.id, materialData);
+        showToast('Material actualizado', 'success');
       } else {
         await db.materiales.create(materialData);
+        showToast('Material creado exitosamente', 'success');
       }
       await loadData();
       setShowModal(false);
       setEditingMaterial(null);
     } catch (error) {
       console.error('Error saving material:', error);
-      alert('Error al guardar el material');
+      showToast('Error al guardar el material', 'error');
     }
   };
 
@@ -93,9 +96,10 @@ export default function MaterialesPage() {
       await loadData();
       setShowMovimientoModal(false);
       setSelectedMaterial(null);
+      showToast('Movimiento de inventario registrado', 'success', `${movimientoData.tipo.charAt(0).toUpperCase() + movimientoData.tipo.slice(1)} de ${movimientoData.cantidad} unidades.`);
     } catch (error) {
       console.error('Error saving movimiento:', error);
-      alert('Error al registrar el movimiento');
+      showToast('Error al registrar el movimiento', 'error');
     }
   };
 

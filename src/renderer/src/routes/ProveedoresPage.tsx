@@ -5,6 +5,7 @@ import Header from '../components/layout/Header';
 import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
 import Input from '../components/ui/Input';
+import { showToast } from '../components/ui/Toast';
 import { db } from '../lib/database';
 import type { Proveedor, Material } from '../types';
 
@@ -48,15 +49,17 @@ export default function ProveedoresPage() {
     try {
       if (editingProveedor) {
         await db.proveedores.update(editingProveedor.id, proveedorData);
+        showToast('Proveedor actualizado', 'success');
       } else {
         await db.proveedores.create(proveedorData);
+        showToast('Proveedor creado exitosamente', 'success');
       }
       await loadProveedores();
       setShowModal(false);
       setEditingProveedor(null);
     } catch (error) {
       console.error('Error saving proveedor:', error);
-      alert('Error al guardar el proveedor');
+      showToast('Error al guardar el proveedor', 'error');
     }
   };
 
@@ -66,9 +69,10 @@ export default function ProveedoresPage() {
     try {
       await db.proveedores.delete(id);
       await loadProveedores();
+      showToast('Proveedor eliminado', 'info');
     } catch (error: any) {
       console.error('Error deleting proveedor:', error);
-      alert(error.message || 'Error al eliminar el proveedor');
+      showToast(error.message || 'Error al eliminar el proveedor', 'error');
     }
   };
 

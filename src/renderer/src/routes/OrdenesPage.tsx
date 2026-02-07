@@ -115,8 +115,10 @@ export default function OrdenesPage() {
     try {
       await db.ordenes.confirmar(ordenId);
       await loadData();
+      showToast('Orden confirmada', 'success', 'La orden de compra ha sido confirmada.');
     } catch (error) {
       console.error('Error confirmando orden:', error);
+      showToast('Error al confirmar la orden', 'error');
     }
   };
 
@@ -136,8 +138,10 @@ export default function OrdenesPage() {
     try {
       await db.ordenes.update(ordenId, { estado: 'cancelada' });
       await loadData();
+      showToast('Orden cancelada', 'info', 'La orden de compra ha sido cancelada.');
     } catch (error) {
       console.error('Error cancelando orden:', error);
+      showToast('Error al cancelar la orden', 'error');
     }
   };
 

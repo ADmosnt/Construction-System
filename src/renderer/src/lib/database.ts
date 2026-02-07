@@ -122,7 +122,17 @@ export const db = {
       actividad_id: number;
       nuevo_avance: number;
       consumos: ConsumoConfirmacion[];
-    }): Promise<{ success: boolean; advertencias?: string[] }> => {
+    }): Promise<{
+      success: boolean;
+      advertencias?: string[];
+      estadosMateriales?: Array<{
+        nombre: string;
+        stock_actual: number;
+        stock_minimo: number;
+        nivel: 'critico' | 'bajo' | 'normal';
+        consumido: number;
+      }>;
+    }> => {
       return window.electron.ipcRenderer.invoke('db:actividades:confirmarAvance', data);
     }
   },
