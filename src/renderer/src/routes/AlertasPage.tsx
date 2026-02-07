@@ -322,9 +322,9 @@ export default function AlertasPage() {
                         )}
 
                         {/* Stock Actual - solo para alertas con material */}
-                        {stockActual !== undefined && (
+                        {stockActual != null && (
                           <div className={`bg-white bg-opacity-50 rounded p-3 ${
-                            stockMinimo !== undefined && stockActual < stockMinimo
+                            stockMinimo != null && stockActual < stockMinimo
                               ? 'ring-2 ring-red-300'
                               : ''
                           }`}>
@@ -332,13 +332,13 @@ export default function AlertasPage() {
                             <p className={`font-bold text-lg ${
                               stockActual <= 0
                                 ? 'text-red-700'
-                                : stockMinimo !== undefined && stockActual < stockMinimo
+                                : stockMinimo != null && stockActual < stockMinimo
                                   ? 'text-orange-700'
                                   : 'text-gray-900'
                             }`}>
                               {stockActual.toFixed(2)} <span className="text-xs font-normal text-gray-500">{unidad}</span>
                             </p>
-                            {stockMinimo !== undefined && (
+                            {stockMinimo != null && (
                               <p className="text-xs text-gray-500 mt-0.5">Min: {stockMinimo.toFixed(2)}</p>
                             )}
                           </div>
@@ -353,11 +353,11 @@ export default function AlertasPage() {
                           </div>
                         )}
 
-                        {alerta.cantidad_sugerida !== null && alerta.cantidad_sugerida !== undefined && (
+                        {alerta.cantidad_sugerida != null && (
                           <div className="bg-white bg-opacity-50 rounded p-3">
                             <p className="text-xs text-gray-600 mb-1">Cantidad Sugerida</p>
                             <p className="font-semibold text-sm">
-                              {alerta.cantidad_sugerida.toFixed(2)} <span className="text-xs text-gray-500">{unidad}</span>
+                              {Number(alerta.cantidad_sugerida).toFixed(2)} <span className="text-xs text-gray-500">{unidad}</span>
                             </p>
                           </div>
                         )}
@@ -404,7 +404,7 @@ export default function AlertasPage() {
                               </div>
                               <div className="bg-white bg-opacity-50 rounded p-3">
                                 <p className="text-xs text-gray-600 mb-1">Capital parado</p>
-                                <p className="font-bold text-sm text-gray-700">${datos.valor_parado.toFixed(2)}</p>
+                                <p className="font-bold text-sm text-gray-700">${Number(datos.valor_parado || 0).toFixed(2)}</p>
                               </div>
                             </>
                           );
@@ -412,17 +412,19 @@ export default function AlertasPage() {
 
                         {alerta.tipo === 'variacion_precio' && alerta.datos_extra && (() => {
                           const datos = JSON.parse(alerta.datos_extra);
+                          const variacion = Number(datos.variacion_porcentaje || 0);
+                          const precioAnt = Number(datos.precio_anterior || 0);
                           return (
                             <>
                               <div className="bg-white bg-opacity-50 rounded p-3">
                                 <p className="text-xs text-gray-600 mb-1">Variacion</p>
-                                <p className={`font-bold text-lg ${datos.variacion_porcentaje > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                                  {datos.variacion_porcentaje > 0 ? '+' : ''}{datos.variacion_porcentaje.toFixed(1)}%
+                                <p className={`font-bold text-lg ${variacion > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                                  {variacion > 0 ? '+' : ''}{variacion.toFixed(1)}%
                                 </p>
                               </div>
                               <div className="bg-white bg-opacity-50 rounded p-3">
                                 <p className="text-xs text-gray-600 mb-1">Precio anterior</p>
-                                <p className="font-semibold text-sm">${datos.precio_anterior.toFixed(2)}</p>
+                                <p className="font-semibold text-sm">${precioAnt.toFixed(2)}</p>
                               </div>
                             </>
                           );
@@ -440,7 +442,7 @@ export default function AlertasPage() {
                           <Button
                             size="sm"
                             variant="secondary"
-                            onClick={() => navigate(`/ordenes?materialId=${alerta.material_id}&proyectoId=${alerta.proyecto_id || ''}&cantidad=${alerta.cantidad_sugerida!.toFixed(2)}`)}
+                            onClick={() => navigate(`/ordenes?materialId=${alerta.material_id}&proyectoId=${alerta.proyecto_id || ''}&cantidad=${Number(alerta.cantidad_sugerida).toFixed(2)}`)}
                           >
                             Generar Orden
                           </Button>
