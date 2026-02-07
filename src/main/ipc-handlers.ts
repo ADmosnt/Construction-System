@@ -388,12 +388,15 @@ export function registerIpcHandlers(): void {
   
   ipcMain.handle('db:alertas:getAll', async () => {
     return dbHelpers.all(`
-      SELECT a.*, p.nombre as proyecto_nombre, m.nombre as material_nombre
+      SELECT a.*, p.nombre as proyecto_nombre, m.nombre as material_nombre,
+             m.stock_actual as material_stock_actual, m.stock_minimo as material_stock_minimo,
+             u.abreviatura as material_unidad_abrev
       FROM alertas a
       JOIN proyectos p ON a.proyecto_id = p.id
       JOIN materiales m ON a.material_id = m.id
+      LEFT JOIN unidades_medida u ON m.unidad_medida_id = u.id
       WHERE a.estado = 'pendiente'
-      ORDER BY 
+      ORDER BY
         CASE a.nivel
           WHEN 'critica' THEN 1
           WHEN 'alta' THEN 2
@@ -409,6 +412,25 @@ export function registerIpcHandlers(): void {
       `UPDATE alertas SET estado = 'atendida', atendida_at = CURRENT_TIMESTAMP WHERE id = ?`,
       [id]
     );
+  });
+
+  // Regenerar alertas para todos los proyectos activos
+  ipcMain.handle('db:alertas:regenerarTodas', async () => {
+    const proyectos = dbHelpers.all<{ id: number }>(
+      "SELECT id FROM proyectos WHERE estado = 'activo'"
+    );
+    for (const p of proyectos) {
+      generarAlertasProyecto(p.id);
+    }
+    return { success: true, proyectos: proyectos.length };
+  });
+
+  // Conteo rapido de alertas pendientes (para badge del sidebar)
+  ipcMain.handle('db:alertas:count', async () => {
+    const result = dbHelpers.get<{ count: number }>(
+      "SELECT COUNT(*) as count FROM alertas WHERE estado = 'pendiente'"
+    );
+    return result?.count || 0;
   });
 
   // ==================== UNIDADES DE MEDIDA ====================

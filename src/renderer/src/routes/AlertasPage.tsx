@@ -1,6 +1,6 @@
 // src/render/src/routes/AlertasPage.tsx
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Header from '../components/layout/Header';
 import { showToast } from '../components/ui/Toast';
@@ -13,15 +13,12 @@ export default function AlertasPage() {
   const navigate = useNavigate();
   const [alertas, setAlertas] = useState<Alerta[]>([]);
   const [loading, setLoading] = useState(true);
+  const [regenerando, setRegenerando] = useState(false);
   const [filtro, setFiltro] = useState<'todas' | 'critica' | 'alta' | 'media' | 'baja'>('todas');
   const [showCriticidadModal, setShowCriticidadModal] = useState(false);
   const [showDesabastecimientoModal, setShowDesabastecimientoModal] = useState(false);
 
-  useEffect(() => {
-    loadAlertas();
-  }, []);
-
-  const loadAlertas = async () => {
+  const loadAlertas = useCallback(async () => {
     try {
       const data = await db.alertas.getAll();
       setAlertas(data);
@@ -29,6 +26,50 @@ export default function AlertasPage() {
       console.error('Error loading alertas:', error);
     } finally {
       setLoading(false);
+    }
+  }, []);
+
+  // Al montar: regenerar alertas de todos los proyectos activos y luego cargar
+  useEffect(() => {
+    const init = async () => {
+      try {
+        setRegenerando(true);
+        await db.alertas.regenerarTodas();
+      } catch (error) {
+        console.error('Error regenerando alertas:', error);
+      } finally {
+        setRegenerando(false);
+      }
+      await loadAlertas();
+    };
+    init();
+  }, [loadAlertas]);
+
+  // Auto-refresh cada 30 segundos
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      try {
+        await db.alertas.regenerarTodas();
+        const data = await db.alertas.getAll();
+        setAlertas(data);
+      } catch (error) {
+        console.error('Error en auto-refresh de alertas:', error);
+      }
+    }, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleRefrescar = async () => {
+    try {
+      setRegenerando(true);
+      await db.alertas.regenerarTodas();
+      await loadAlertas();
+      showToast('Alertas actualizadas', 'info');
+    } catch (error) {
+      console.error('Error refrescando alertas:', error);
+      showToast('Error al actualizar alertas', 'error');
+    } finally {
+      setRegenerando(false);
     }
   };
 
@@ -92,7 +133,9 @@ export default function AlertasPage() {
       <div className="flex items-center justify-center h-screen">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Cargando alertas...</p>
+          <p className="mt-4 text-gray-600">
+            {regenerando ? 'Recalculando alertas...' : 'Cargando alertas...'}
+          </p>
         </div>
       </div>
     );
@@ -104,7 +147,15 @@ export default function AlertasPage() {
         title="Alertas"
         subtitle={`${alertas.length} alertas pendientes`}
         action={
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleRefrescar}
+              disabled={regenerando}
+            >
+              {regenerando ? 'Actualizando...' : 'Refrescar Alertas'}
+            </Button>
             <Button variant="ghost" size="sm" onClick={() => setShowCriticidadModal(true)}>
               ? Niveles de Criticidad
             </Button>
@@ -117,12 +168,12 @@ export default function AlertasPage() {
 
       <div className="p-8">
         {/* Filtros y Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4 mb-6">
           <button
             onClick={() => setFiltro('todas')}
             className={`p-4 rounded-lg border-2 transition-all ${
-              filtro === 'todas' 
-                ? 'border-blue-500 bg-blue-50' 
+              filtro === 'todas'
+                ? 'border-blue-500 bg-blue-50'
                 : 'border-gray-200 bg-white hover:border-gray-300'
             }`}
           >
@@ -133,22 +184,22 @@ export default function AlertasPage() {
           <button
             onClick={() => setFiltro('critica')}
             className={`p-4 rounded-lg border-2 transition-all ${
-              filtro === 'critica' 
-                ? 'border-red-500 bg-red-50' 
+              filtro === 'critica'
+                ? 'border-red-500 bg-red-50'
                 : 'border-gray-200 bg-white hover:border-gray-300'
             }`}
           >
             <p className="text-2xl font-bold text-red-600">
               {alertas.filter(a => a.nivel === 'critica').length}
             </p>
-            <p className="text-sm text-gray-600">Críticas</p>
+            <p className="text-sm text-gray-600">Criticas</p>
           </button>
 
           <button
             onClick={() => setFiltro('alta')}
             className={`p-4 rounded-lg border-2 transition-all ${
-              filtro === 'alta' 
-                ? 'border-orange-500 bg-orange-50' 
+              filtro === 'alta'
+                ? 'border-orange-500 bg-orange-50'
                 : 'border-gray-200 bg-white hover:border-gray-300'
             }`}
           >
@@ -161,8 +212,8 @@ export default function AlertasPage() {
           <button
             onClick={() => setFiltro('media')}
             className={`p-4 rounded-lg border-2 transition-all ${
-              filtro === 'media' 
-                ? 'border-yellow-500 bg-yellow-50' 
+              filtro === 'media'
+                ? 'border-yellow-500 bg-yellow-50'
                 : 'border-gray-200 bg-white hover:border-gray-300'
             }`}
           >
@@ -175,8 +226,8 @@ export default function AlertasPage() {
           <button
             onClick={() => setFiltro('baja')}
             className={`p-4 rounded-lg border-2 transition-all ${
-              filtro === 'baja' 
-                ? 'border-blue-500 bg-blue-50' 
+              filtro === 'baja'
+                ? 'border-blue-500 bg-blue-50'
                 : 'border-gray-200 bg-white hover:border-gray-300'
             }`}
           >
@@ -195,7 +246,7 @@ export default function AlertasPage() {
               {filtro === 'todas' ? 'No hay alertas pendientes' : `No hay alertas de nivel ${filtro}`}
             </h3>
             <p className="text-gray-600">
-              {filtro === 'todas' 
+              {filtro === 'todas'
                 ? 'Todos los materiales están en niveles óptimos'
                 : 'Intenta con otro filtro para ver más alertas'
               }
@@ -206,9 +257,12 @@ export default function AlertasPage() {
             {alertasFiltradas.map((alerta) => {
               const color = getColorNivel(alerta.nivel);
               const icono = getIconoTipo(alerta.tipo);
+              const stockActual = alerta.material_stock_actual;
+              const stockMinimo = alerta.material_stock_minimo;
+              const unidad = alerta.material_unidad_abrev || '';
 
               return (
-                <div 
+                <div
                   key={alerta.id}
                   className={`${color.bg} border-2 ${color.border} rounded-lg p-6 transition-all hover:shadow-lg`}
                 >
@@ -235,17 +289,38 @@ export default function AlertasPage() {
 
                       <p className="text-gray-700 mb-3">{alerta.mensaje}</p>
 
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
                         <div className="bg-white bg-opacity-50 rounded p-3">
                           <p className="text-xs text-gray-600 mb-1">Proyecto</p>
                           <p className="font-semibold text-sm">{alerta.proyecto_nombre}</p>
+                        </div>
+
+                        {/* Stock Actual */}
+                        <div className={`bg-white bg-opacity-50 rounded p-3 ${
+                          stockActual !== undefined && stockMinimo !== undefined && stockActual < stockMinimo
+                            ? 'ring-2 ring-red-300'
+                            : ''
+                        }`}>
+                          <p className="text-xs text-gray-600 mb-1">Stock Actual</p>
+                          <p className={`font-bold text-lg ${
+                            stockActual !== undefined && stockActual <= 0
+                              ? 'text-red-700'
+                              : stockActual !== undefined && stockMinimo !== undefined && stockActual < stockMinimo
+                                ? 'text-orange-700'
+                                : 'text-gray-900'
+                          }`}>
+                            {stockActual !== undefined ? stockActual.toFixed(2) : '—'} <span className="text-xs font-normal text-gray-500">{unidad}</span>
+                          </p>
+                          {stockMinimo !== undefined && (
+                            <p className="text-xs text-gray-500 mt-0.5">Min: {stockMinimo.toFixed(2)}</p>
+                          )}
                         </div>
 
                         {alerta.dias_hasta_desabastecimiento !== null && (
                           <div className="bg-white bg-opacity-50 rounded p-3">
                             <p className="text-xs text-gray-600 mb-1">Desabastecimiento en</p>
                             <p className={`font-bold text-lg ${color.text}`}>
-                              {alerta.dias_hasta_desabastecimiento} días
+                              {alerta.dias_hasta_desabastecimiento} dias
                             </p>
                           </div>
                         )}
@@ -253,7 +328,7 @@ export default function AlertasPage() {
                         <div className="bg-white bg-opacity-50 rounded p-3">
                           <p className="text-xs text-gray-600 mb-1">Cantidad Sugerida</p>
                           <p className="font-semibold text-sm">
-                            {alerta.cantidad_sugerida.toFixed(2)}
+                            {alerta.cantidad_sugerida.toFixed(2)} <span className="text-xs text-gray-500">{unidad}</span>
                           </p>
                         </div>
 
@@ -267,26 +342,26 @@ export default function AlertasPage() {
                         )}
                       </div>
 
-                      <div className="flex gap-2">
-                        <Button 
+                      <div className="flex flex-wrap gap-2">
+                        <Button
                           size="sm"
                           onClick={() => handleMarcarAtendida(alerta.id)}
                         >
-                          ✓ Marcar como Atendida
+                          Marcar como Atendida
                         </Button>
-                        <Button 
+                        <Button
                           size="sm"
                           variant="secondary"
                           onClick={() => navigate(`/ordenes?materialId=${alerta.material_id}&proyectoId=${alerta.proyecto_id}&cantidad=${alerta.cantidad_sugerida.toFixed(2)}`)}
                         >
-                          📋 Generar Orden
+                          Generar Orden
                         </Button>
-                        <Button 
+                        <Button
                           size="sm"
                           variant="ghost"
                           onClick={() => navigate(`/proyectos/${alerta.proyecto_id}`)}
                         >
-                          Ver Proyecto →
+                          Ver Proyecto
                         </Button>
                       </div>
                     </div>

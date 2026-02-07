@@ -149,6 +149,14 @@ export const db = {
     
     generar: async (proyectoId: number): Promise<void> => {
       return window.electron.ipcRenderer.invoke('db:alertas:generar', proyectoId);
+    },
+
+    regenerarTodas: async (): Promise<{ success: boolean; proyectos: number }> => {
+      return window.electron.ipcRenderer.invoke('db:alertas:regenerarTodas');
+    },
+
+    count: async (): Promise<number> => {
+      return window.electron.ipcRenderer.invoke('db:alertas:count');
     }
   },
 

@@ -1,12 +1,14 @@
 // src/render/src/components/layout/Sidebar.tsx
 
+import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import { db } from '../../lib/database';
 
 const menuItems = [
   { path: '/', icon: '📊', label: 'Dashboard' },
   { path: '/proyectos', icon: '📋', label: 'Proyectos' },
   { path: '/materiales', icon: '📦', label: 'Materiales' },
-  { path: '/alertas', icon: '🚨', label: 'Alertas' },
+  { path: '/alertas', icon: '🚨', label: 'Alertas', showBadge: true },
   { path: '/ordenes', icon: '📋', label: 'Órdenes de Compra' },
   { path: '/proveedores', icon: '🏢', label: 'Proveedores' },
   { path: '/inventario', icon: '📊', label: 'Inventario' },
@@ -14,6 +16,36 @@ const menuItems = [
 
 export default function Sidebar() {
   const location = useLocation();
+  const [alertCount, setAlertCount] = useState(0);
+
+  // Cargar conteo de alertas al montar y cada 15 segundos
+  useEffect(() => {
+    const loadCount = async () => {
+      try {
+        const count = await db.alertas.count();
+        setAlertCount(count);
+      } catch (error) {
+        // Silenciar errores del badge
+      }
+    };
+
+    loadCount();
+    const interval = setInterval(loadCount, 15000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Recargar conteo cuando cambia la ruta (el usuario navega)
+  useEffect(() => {
+    const loadCount = async () => {
+      try {
+        const count = await db.alertas.count();
+        setAlertCount(count);
+      } catch (error) {
+        // Silenciar errores del badge
+      }
+    };
+    loadCount();
+  }, [location.pathname]);
 
   return (
     <aside className="w-64 bg-gray-900 text-white h-screen flex flex-col">
@@ -35,14 +67,26 @@ export default function Sidebar() {
                   className={`
                     flex items-center gap-3 px-4 py-3 rounded-lg
                     transition-colors duration-200
-                    ${isActive 
-                      ? 'bg-blue-600 text-white' 
+                    ${isActive
+                      ? 'bg-blue-600 text-white'
                       : 'text-gray-300 hover:bg-gray-800 hover:text-white'
                     }
                   `}
                 >
                   <span className="text-xl">{item.icon}</span>
-                  <span className="font-medium">{item.label}</span>
+                  <span className="font-medium flex-1">{item.label}</span>
+                  {item.showBadge && alertCount > 0 && (
+                    <span className={`
+                      min-w-[22px] h-[22px] flex items-center justify-center
+                      text-xs font-bold rounded-full px-1.5
+                      ${isActive
+                        ? 'bg-white text-blue-700'
+                        : 'bg-red-500 text-white'
+                      }
+                    `}>
+                      {alertCount > 99 ? '99+' : alertCount}
+                    </span>
+                  )}
                 </Link>
               </li>
             );

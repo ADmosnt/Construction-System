@@ -75,6 +75,9 @@ export interface Alerta {
   // Campos joined
   proyecto_nombre?: string;
   material_nombre?: string;
+  material_stock_actual?: number;
+  material_stock_minimo?: number;
+  material_unidad_abrev?: string;
 }
 
 export interface UnidadMedida {
