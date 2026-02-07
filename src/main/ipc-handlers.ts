@@ -2,7 +2,7 @@
 
 import { ipcMain } from 'electron';
 import { dbHelpers } from './database';
-import { generarAlertasProyecto } from './alerts';
+import { generarAlertasProyecto, generarAlertasGlobales } from './alerts';
 import { simularConsumoProyecto } from './simulator';
 
 /**
@@ -419,7 +419,7 @@ export function registerIpcHandlers(): void {
     );
   });
 
-  // Regenerar alertas para todos los proyectos activos
+  // Regenerar alertas para todos los proyectos activos + alertas globales
   ipcMain.handle('db:alertas:regenerarTodas', async () => {
     const proyectos = dbHelpers.all<{ id: number }>(
       "SELECT id FROM proyectos WHERE estado = 'activo'"
@@ -427,7 +427,8 @@ export function registerIpcHandlers(): void {
     for (const p of proyectos) {
       generarAlertasProyecto(p.id);
     }
-    return { success: true, proyectos: proyectos.length };
+    const globales = generarAlertasGlobales();
+    return { success: true, proyectos: proyectos.length, globales };
   });
 
   // Conteo rapido de alertas pendientes (para badge del sidebar)
@@ -634,6 +635,79 @@ export function registerIpcHandlers(): void {
       console.error('Error en simulación:', error);
       throw error;
     }
+  });
+
+  // ==================== DEPENDENCIAS DE ACTIVIDAD ====================
+
+  ipcMain.handle('db:dependencias:getByActividad', async (_, actividadId: number) => {
+    return dbHelpers.all(`
+      SELECT dep.*,
+             a.nombre as actividad_nombre,
+             prec.nombre as precedente_nombre,
+             prec.avance_real as precedente_avance
+      FROM actividad_dependencias dep
+      JOIN actividades a ON dep.actividad_id = a.id
+      JOIN actividades prec ON dep.actividad_precedente_id = prec.id
+      WHERE dep.actividad_id = ?
+      ORDER BY prec.orden
+    `, [actividadId]);
+  });
+
+  ipcMain.handle('db:dependencias:getByProyecto', async (_, proyectoId: number) => {
+    return dbHelpers.all(`
+      SELECT dep.*,
+             a.nombre as actividad_nombre,
+             prec.nombre as precedente_nombre,
+             prec.avance_real as precedente_avance
+      FROM actividad_dependencias dep
+      JOIN actividades a ON dep.actividad_id = a.id
+      JOIN actividades prec ON dep.actividad_precedente_id = prec.id
+      WHERE a.proyecto_id = ?
+      ORDER BY a.orden, prec.orden
+    `, [proyectoId]);
+  });
+
+  ipcMain.handle('db:dependencias:create', async (_, data: { actividad_id: number; actividad_precedente_id: number; tipo_dependencia?: string; dias_espera?: number }) => {
+    if (data.actividad_id === data.actividad_precedente_id) {
+      throw new Error('Una actividad no puede depender de si misma');
+    }
+    return dbHelpers.run(
+      `INSERT INTO actividad_dependencias (actividad_id, actividad_precedente_id, tipo_dependencia, dias_espera)
+       VALUES (?, ?, ?, ?)`,
+      [data.actividad_id, data.actividad_precedente_id, data.tipo_dependencia || 'FS', data.dias_espera || 0]
+    );
+  });
+
+  ipcMain.handle('db:dependencias:delete', async (_, id: number) => {
+    return dbHelpers.run('DELETE FROM actividad_dependencias WHERE id = ?', [id]);
+  });
+
+  // Verificar si una actividad tiene dependencias bloqueantes (para validar en confirmarAvance)
+  ipcMain.handle('db:dependencias:verificarBloqueo', async (_, actividadId: number) => {
+    const dependencias = dbHelpers.all<{
+      precedente_nombre: string;
+      precedente_avance: number;
+      tipo_dependencia: string;
+    }>(`
+      SELECT
+        prec.nombre as precedente_nombre,
+        prec.avance_real as precedente_avance,
+        dep.tipo_dependencia
+      FROM actividad_dependencias dep
+      JOIN actividades prec ON dep.actividad_precedente_id = prec.id
+      WHERE dep.actividad_id = ?
+    `, [actividadId]);
+
+    const bloqueadores: string[] = [];
+    for (const dep of dependencias) {
+      if (dep.tipo_dependencia === 'FS' && dep.precedente_avance < 100) {
+        bloqueadores.push(`"${dep.precedente_nombre}" (${dep.precedente_avance}%)`);
+      } else if ((dep.tipo_dependencia === 'SS' || dep.tipo_dependencia === 'SF') && dep.precedente_avance === 0) {
+        bloqueadores.push(`"${dep.precedente_nombre}" (no iniciada)`);
+      }
+    }
+
+    return { bloqueada: bloqueadores.length > 0, bloqueadores };
   });
 
   // ==================== MATERIALES DE ACTIVIDAD ====================

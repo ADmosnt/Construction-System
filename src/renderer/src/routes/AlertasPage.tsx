@@ -120,12 +120,31 @@ export default function AlertasPage() {
   };
 
   const getIconoTipo = (tipo: string) => {
-    const iconos = {
+    const iconos: Record<string, string> = {
       'stock_minimo': '\u26A0\uFE0F',
       'desabastecimiento_inminente': '\uD83D\uDEA8',
-      'reorden_sugerido': '\uD83D\uDCE6'
+      'reorden_sugerido': '\uD83D\uDCE6',
+      'desviacion_consumo': '\uD83D\uDD0D',
+      'stock_estancado': '\uD83D\uDCE4',
+      'vencimiento_material': '\u23F0',
+      'variacion_precio': '\uD83D\uDCB0',
+      'dependencia_bloqueada': '\uD83D\uDD12'
     };
-    return iconos[tipo as keyof typeof iconos] || '\uD83D\uDCCC';
+    return iconos[tipo] || '\uD83D\uDCCC';
+  };
+
+  const getNombreTipo = (tipo: string) => {
+    const nombres: Record<string, string> = {
+      'stock_minimo': 'Stock Bajo',
+      'desabastecimiento_inminente': 'Desabastecimiento',
+      'reorden_sugerido': 'Reorden Sugerido',
+      'desviacion_consumo': 'Desviacion Consumo',
+      'stock_estancado': 'Stock Estancado',
+      'vencimiento_material': 'Vencimiento',
+      'variacion_precio': 'Variacion Precio',
+      'dependencia_bloqueada': 'Dependencia Bloqueada'
+    };
+    return nombres[tipo] || tipo;
   };
 
   if (loading) {
@@ -283,38 +302,47 @@ export default function AlertasPage() {
                         </div>
                       </div>
 
-                      <h3 className={`text-xl font-bold ${color.text} mb-2`}>
-                        {alerta.material_nombre}
-                      </h3>
+                      <div className="flex items-center gap-2 mb-2">
+                        <h3 className={`text-xl font-bold ${color.text}`}>
+                          {alerta.material_nombre || alerta.actividad_nombre || 'Sistema'}
+                        </h3>
+                        <span className="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full">
+                          {getNombreTipo(alerta.tipo)}
+                        </span>
+                      </div>
 
                       <p className="text-gray-700 mb-3">{alerta.mensaje}</p>
 
                       <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
-                        <div className="bg-white bg-opacity-50 rounded p-3">
-                          <p className="text-xs text-gray-600 mb-1">Proyecto</p>
-                          <p className="font-semibold text-sm">{alerta.proyecto_nombre}</p>
-                        </div>
+                        {alerta.proyecto_nombre && (
+                          <div className="bg-white bg-opacity-50 rounded p-3">
+                            <p className="text-xs text-gray-600 mb-1">Proyecto</p>
+                            <p className="font-semibold text-sm">{alerta.proyecto_nombre}</p>
+                          </div>
+                        )}
 
-                        {/* Stock Actual */}
-                        <div className={`bg-white bg-opacity-50 rounded p-3 ${
-                          stockActual !== undefined && stockMinimo !== undefined && stockActual < stockMinimo
-                            ? 'ring-2 ring-red-300'
-                            : ''
-                        }`}>
-                          <p className="text-xs text-gray-600 mb-1">Stock Actual</p>
-                          <p className={`font-bold text-lg ${
-                            stockActual !== undefined && stockActual <= 0
-                              ? 'text-red-700'
-                              : stockActual !== undefined && stockMinimo !== undefined && stockActual < stockMinimo
-                                ? 'text-orange-700'
-                                : 'text-gray-900'
+                        {/* Stock Actual - solo para alertas con material */}
+                        {stockActual !== undefined && (
+                          <div className={`bg-white bg-opacity-50 rounded p-3 ${
+                            stockMinimo !== undefined && stockActual < stockMinimo
+                              ? 'ring-2 ring-red-300'
+                              : ''
                           }`}>
-                            {stockActual !== undefined ? stockActual.toFixed(2) : '—'} <span className="text-xs font-normal text-gray-500">{unidad}</span>
-                          </p>
-                          {stockMinimo !== undefined && (
-                            <p className="text-xs text-gray-500 mt-0.5">Min: {stockMinimo.toFixed(2)}</p>
-                          )}
-                        </div>
+                            <p className="text-xs text-gray-600 mb-1">Stock Actual</p>
+                            <p className={`font-bold text-lg ${
+                              stockActual <= 0
+                                ? 'text-red-700'
+                                : stockMinimo !== undefined && stockActual < stockMinimo
+                                  ? 'text-orange-700'
+                                  : 'text-gray-900'
+                            }`}>
+                              {stockActual.toFixed(2)} <span className="text-xs font-normal text-gray-500">{unidad}</span>
+                            </p>
+                            {stockMinimo !== undefined && (
+                              <p className="text-xs text-gray-500 mt-0.5">Min: {stockMinimo.toFixed(2)}</p>
+                            )}
+                          </div>
+                        )}
 
                         {alerta.dias_hasta_desabastecimiento !== null && (
                           <div className="bg-white bg-opacity-50 rounded p-3">
@@ -325,12 +353,14 @@ export default function AlertasPage() {
                           </div>
                         )}
 
-                        <div className="bg-white bg-opacity-50 rounded p-3">
-                          <p className="text-xs text-gray-600 mb-1">Cantidad Sugerida</p>
-                          <p className="font-semibold text-sm">
-                            {alerta.cantidad_sugerida.toFixed(2)} <span className="text-xs text-gray-500">{unidad}</span>
-                          </p>
-                        </div>
+                        {alerta.cantidad_sugerida !== null && alerta.cantidad_sugerida !== undefined && (
+                          <div className="bg-white bg-opacity-50 rounded p-3">
+                            <p className="text-xs text-gray-600 mb-1">Cantidad Sugerida</p>
+                            <p className="font-semibold text-sm">
+                              {alerta.cantidad_sugerida.toFixed(2)} <span className="text-xs text-gray-500">{unidad}</span>
+                            </p>
+                          </div>
+                        )}
 
                         {alerta.fecha_sugerida_pedido && (
                           <div className="bg-white bg-opacity-50 rounded p-3">
@@ -340,6 +370,63 @@ export default function AlertasPage() {
                             </p>
                           </div>
                         )}
+
+                        {/* Datos extra para tipos especializados */}
+                        {alerta.tipo === 'desviacion_consumo' && alerta.datos_extra && (() => {
+                          const datos = JSON.parse(alerta.datos_extra);
+                          return (
+                            <div className="bg-white bg-opacity-50 rounded p-3">
+                              <p className="text-xs text-gray-600 mb-1">Desviacion</p>
+                              <p className="font-bold text-lg text-red-600">+{datos.desviacion}%</p>
+                            </div>
+                          );
+                        })()}
+
+                        {alerta.tipo === 'vencimiento_material' && alerta.datos_extra && (() => {
+                          const datos = JSON.parse(alerta.datos_extra);
+                          return (
+                            <div className="bg-white bg-opacity-50 rounded p-3">
+                              <p className="text-xs text-gray-600 mb-1">Vence en</p>
+                              <p className={`font-bold text-lg ${datos.dias_para_vencer <= 0 ? 'text-red-700' : datos.dias_para_vencer <= 7 ? 'text-orange-600' : color.text}`}>
+                                {datos.dias_para_vencer <= 0 ? 'VENCIDO' : `${datos.dias_para_vencer} dias`}
+                              </p>
+                            </div>
+                          );
+                        })()}
+
+                        {alerta.tipo === 'stock_estancado' && alerta.datos_extra && (() => {
+                          const datos = JSON.parse(alerta.datos_extra);
+                          return (
+                            <>
+                              <div className="bg-white bg-opacity-50 rounded p-3">
+                                <p className="text-xs text-gray-600 mb-1">Sin movimiento</p>
+                                <p className="font-bold text-lg text-gray-700">{datos.dias_sin_movimiento} dias</p>
+                              </div>
+                              <div className="bg-white bg-opacity-50 rounded p-3">
+                                <p className="text-xs text-gray-600 mb-1">Capital parado</p>
+                                <p className="font-bold text-sm text-gray-700">${datos.valor_parado.toFixed(2)}</p>
+                              </div>
+                            </>
+                          );
+                        })()}
+
+                        {alerta.tipo === 'variacion_precio' && alerta.datos_extra && (() => {
+                          const datos = JSON.parse(alerta.datos_extra);
+                          return (
+                            <>
+                              <div className="bg-white bg-opacity-50 rounded p-3">
+                                <p className="text-xs text-gray-600 mb-1">Variacion</p>
+                                <p className={`font-bold text-lg ${datos.variacion_porcentaje > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                                  {datos.variacion_porcentaje > 0 ? '+' : ''}{datos.variacion_porcentaje.toFixed(1)}%
+                                </p>
+                              </div>
+                              <div className="bg-white bg-opacity-50 rounded p-3">
+                                <p className="text-xs text-gray-600 mb-1">Precio anterior</p>
+                                <p className="font-semibold text-sm">${datos.precio_anterior.toFixed(2)}</p>
+                              </div>
+                            </>
+                          );
+                        })()}
                       </div>
 
                       <div className="flex flex-wrap gap-2">
@@ -349,20 +436,33 @@ export default function AlertasPage() {
                         >
                           Marcar como Atendida
                         </Button>
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          onClick={() => navigate(`/ordenes?materialId=${alerta.material_id}&proyectoId=${alerta.proyecto_id}&cantidad=${alerta.cantidad_sugerida.toFixed(2)}`)}
-                        >
-                          Generar Orden
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => navigate(`/proyectos/${alerta.proyecto_id}`)}
-                        >
-                          Ver Proyecto
-                        </Button>
+                        {alerta.material_id && alerta.cantidad_sugerida && alerta.cantidad_sugerida > 0 && (
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => navigate(`/ordenes?materialId=${alerta.material_id}&proyectoId=${alerta.proyecto_id || ''}&cantidad=${alerta.cantidad_sugerida!.toFixed(2)}`)}
+                          >
+                            Generar Orden
+                          </Button>
+                        )}
+                        {alerta.proyecto_id && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => navigate(`/proyectos/${alerta.proyecto_id}`)}
+                          >
+                            Ver Proyecto
+                          </Button>
+                        )}
+                        {alerta.material_id && !alerta.proyecto_id && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => navigate('/materiales')}
+                          >
+                            Ver Material
+                          </Button>
+                        )}
                       </div>
                     </div>
                   </div>

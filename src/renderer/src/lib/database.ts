@@ -12,7 +12,8 @@ import type {
   DetalleOrdenCompra,
   ResultadoSimulacion,
   MaterialActividad,
-  ConsumoConfirmacion
+  ConsumoConfirmacion,
+  ActividadDependencia
 } from '../types';
 
 // Cliente de base de datos para el renderer process
@@ -134,6 +135,29 @@ export const db = {
       }>;
     }> => {
       return window.electron.ipcRenderer.invoke('db:actividades:confirmarAvance', data);
+    }
+  },
+
+  // ==================== DEPENDENCIAS ====================
+  dependencias: {
+    getByActividad: async (actividadId: number): Promise<ActividadDependencia[]> => {
+      return window.electron.ipcRenderer.invoke('db:dependencias:getByActividad', actividadId);
+    },
+
+    getByProyecto: async (proyectoId: number): Promise<ActividadDependencia[]> => {
+      return window.electron.ipcRenderer.invoke('db:dependencias:getByProyecto', proyectoId);
+    },
+
+    create: async (data: { actividad_id: number; actividad_precedente_id: number; tipo_dependencia?: string; dias_espera?: number }): Promise<void> => {
+      return window.electron.ipcRenderer.invoke('db:dependencias:create', data);
+    },
+
+    delete: async (id: number): Promise<void> => {
+      return window.electron.ipcRenderer.invoke('db:dependencias:delete', id);
+    },
+
+    verificarBloqueo: async (actividadId: number): Promise<{ bloqueada: boolean; bloqueadores: string[] }> => {
+      return window.electron.ipcRenderer.invoke('db:dependencias:verificarBloqueo', actividadId);
     }
   },
 
