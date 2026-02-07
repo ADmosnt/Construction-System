@@ -1,5 +1,24 @@
+-- =====================================================================
+-- SCHEMA: Sistema de Gestion de Construccion
+-- Version 2.0 - Incluye: login, dependencias, vencimientos, precios
+-- =====================================================================
+
+-- TABLA: usuarios
+-- Sistema de autenticacion y control de acceso
+CREATE TABLE usuarios (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    nombre_completo TEXT NOT NULL,
+    email TEXT,
+    rol TEXT DEFAULT 'operador' CHECK(rol IN ('admin', 'supervisor', 'operador')),
+    activo BOOLEAN DEFAULT 1,
+    ultimo_login DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
 -- TABLA: proyectos
--- Almacena la información general de cada proyecto de construcción
+-- Almacena la informacion general de cada proyecto de construccion
 CREATE TABLE proyectos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     nombre TEXT NOT NULL,
@@ -15,7 +34,7 @@ CREATE TABLE proyectos (
 );
 
 -- TABLA: proveedores
--- Catálogo de proveedores de materiales
+-- Catalogo de proveedores de materiales
 CREATE TABLE proveedores (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     nombre TEXT NOT NULL,
@@ -28,7 +47,7 @@ CREATE TABLE proveedores (
 );
 
 -- TABLA: unidades_medida
--- Catálogo de unidades de medida para materiales
+-- Catalogo de unidades de medida para materiales
 CREATE TABLE unidades_medida (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     nombre TEXT NOT NULL UNIQUE,
@@ -37,7 +56,7 @@ CREATE TABLE unidades_medida (
 );
 
 -- TABLA: materiales
--- Catálogo de materiales de construcción
+-- Catalogo de materiales de construccion
 CREATE TABLE materiales (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     nombre TEXT NOT NULL,
@@ -49,6 +68,10 @@ CREATE TABLE materiales (
     stock_maximo REAL DEFAULT 0,
     precio_unitario REAL DEFAULT 0,
     es_critico BOOLEAN DEFAULT 0,
+    -- Campos para vencimiento de material (#3)
+    es_perecedero BOOLEAN DEFAULT 0,
+    fecha_vencimiento DATE,
+    dias_aviso_vencimiento INTEGER DEFAULT 15,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (unidad_medida_id) REFERENCES unidades_medida(id),
     FOREIGN KEY (proveedor_id) REFERENCES proveedores(id)
@@ -72,8 +95,23 @@ CREATE TABLE actividades (
     FOREIGN KEY (proyecto_id) REFERENCES proyectos(id) ON DELETE CASCADE
 );
 
+-- TABLA: actividad_dependencias
+-- Relaciones de precedencia entre actividades (#6)
+-- tipo_dependencia: FS=Fin-a-Inicio, SS=Inicio-a-Inicio, FF=Fin-a-Fin, SF=Inicio-a-Fin
+CREATE TABLE actividad_dependencias (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    actividad_id INTEGER NOT NULL,
+    actividad_precedente_id INTEGER NOT NULL,
+    tipo_dependencia TEXT DEFAULT 'FS' CHECK(tipo_dependencia IN ('FS', 'SS', 'FF', 'SF')),
+    dias_espera INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (actividad_id) REFERENCES actividades(id) ON DELETE CASCADE,
+    FOREIGN KEY (actividad_precedente_id) REFERENCES actividades(id) ON DELETE CASCADE,
+    UNIQUE(actividad_id, actividad_precedente_id)
+);
+
 -- TABLA: materiales_actividad
--- Relación entre actividades y materiales (qué materiales necesita cada actividad)
+-- Relacion entre actividades y materiales (que materiales necesita cada actividad)
 CREATE TABLE materiales_actividad (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     actividad_id INTEGER NOT NULL,
@@ -96,38 +134,53 @@ CREATE TABLE movimientos_inventario (
     cantidad REAL NOT NULL,
     motivo TEXT,
     responsable TEXT,
+    lote TEXT,
     fecha DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (material_id) REFERENCES materiales(id),
     FOREIGN KEY (proyecto_id) REFERENCES proyectos(id)
 );
 
 -- TABLA: alertas
--- Alertas generadas por el sistema
+-- Alertas generadas por el sistema (expandida para todos los tipos)
 CREATE TABLE alertas (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    proyecto_id INTEGER NOT NULL,
-    material_id INTEGER NOT NULL,
-    tipo TEXT CHECK(tipo IN ('stock_minimo', 'desabastecimiento_inminente', 'reorden_sugerido')),
+    proyecto_id INTEGER,
+    material_id INTEGER,
+    actividad_id INTEGER,
+    tipo TEXT CHECK(tipo IN (
+        'stock_minimo',
+        'desabastecimiento_inminente',
+        'reorden_sugerido',
+        'desviacion_consumo',
+        'stock_estancado',
+        'vencimiento_material',
+        'variacion_precio',
+        'dependencia_bloqueada'
+    )),
     nivel TEXT CHECK(nivel IN ('baja', 'media', 'alta', 'critica')),
     mensaje TEXT NOT NULL,
     dias_hasta_desabastecimiento INTEGER,
     cantidad_sugerida REAL,
     fecha_sugerida_pedido DATE,
+    -- Metadatos adicionales para alertas especializadas (JSON flexible)
+    datos_extra TEXT,
     estado TEXT DEFAULT 'pendiente' CHECK(estado IN ('pendiente', 'atendida', 'descartada')),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     atendida_at DATETIME,
     FOREIGN KEY (proyecto_id) REFERENCES proyectos(id) ON DELETE CASCADE,
-    FOREIGN KEY (material_id) REFERENCES materiales(id)
+    FOREIGN KEY (material_id) REFERENCES materiales(id),
+    FOREIGN KEY (actividad_id) REFERENCES actividades(id) ON DELETE CASCADE
 );
 
 -- TABLA: ordenes_compra
--- Órdenes de compra generadas (opcional pero útil)
+-- Ordenes de compra generadas
 CREATE TABLE ordenes_compra (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     proveedor_id INTEGER NOT NULL,
     proyecto_id INTEGER,
     fecha_emision DATE NOT NULL,
     fecha_entrega_estimada DATE,
+    fecha_recepcion_real DATE,
     estado TEXT DEFAULT 'pendiente' CHECK(estado IN ('pendiente', 'confirmada', 'en_transito', 'entregada', 'cancelada')),
     total REAL DEFAULT 0,
     notas TEXT,
@@ -148,46 +201,73 @@ CREATE TABLE detalle_orden_compra (
     FOREIGN KEY (material_id) REFERENCES materiales(id)
 );
 
--- ÍNDICES para mejorar rendimiento
+-- =====================================================================
+-- INDICES
+-- =====================================================================
+
 CREATE INDEX idx_proyectos_estado ON proyectos(estado);
 CREATE INDEX idx_materiales_proveedor ON materiales(proveedor_id);
+CREATE INDEX idx_materiales_vencimiento ON materiales(fecha_vencimiento);
 CREATE INDEX idx_actividades_proyecto ON actividades(proyecto_id);
+CREATE INDEX idx_dependencias_actividad ON actividad_dependencias(actividad_id);
+CREATE INDEX idx_dependencias_precedente ON actividad_dependencias(actividad_precedente_id);
 CREATE INDEX idx_alertas_proyecto ON alertas(proyecto_id);
 CREATE INDEX idx_alertas_estado ON alertas(estado);
+CREATE INDEX idx_alertas_tipo ON alertas(tipo);
 CREATE INDEX idx_movimientos_material ON movimientos_inventario(material_id);
 CREATE INDEX idx_movimientos_fecha ON movimientos_inventario(fecha);
+CREATE INDEX idx_movimientos_material_fecha ON movimientos_inventario(material_id, fecha);
+CREATE INDEX idx_ordenes_proveedor ON ordenes_compra(proveedor_id);
+CREATE INDEX idx_ordenes_estado ON ordenes_compra(estado);
+CREATE INDEX idx_detalle_orden_material ON detalle_orden_compra(material_id);
 
--- TRIGGER: Actualizar updated_at en proyectos
-CREATE TRIGGER update_proyecto_timestamp 
+-- =====================================================================
+-- TRIGGERS
+-- =====================================================================
+
+-- Actualizar updated_at en proyectos
+CREATE TRIGGER update_proyecto_timestamp
 AFTER UPDATE ON proyectos
 BEGIN
     UPDATE proyectos SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
 END;
 
--- TRIGGER: Actualizar stock al registrar movimiento
+-- Actualizar stock al registrar movimiento de entrada
 CREATE TRIGGER actualizar_stock_entrada
 AFTER INSERT ON movimientos_inventario
 WHEN NEW.tipo = 'entrada'
 BEGIN
-    UPDATE materiales 
+    UPDATE materiales
     SET stock_actual = stock_actual + NEW.cantidad
     WHERE id = NEW.material_id;
 END;
 
+-- Actualizar stock al registrar movimiento de salida
 CREATE TRIGGER actualizar_stock_salida
 AFTER INSERT ON movimientos_inventario
 WHEN NEW.tipo = 'salida'
 BEGIN
-    UPDATE materiales 
+    UPDATE materiales
     SET stock_actual = stock_actual - NEW.cantidad
     WHERE id = NEW.material_id;
 END;
 
+-- Actualizar stock al registrar ajuste (valor absoluto)
 CREATE TRIGGER actualizar_stock_ajuste
 AFTER INSERT ON movimientos_inventario
 WHEN NEW.tipo = 'ajuste'
 BEGIN
-    UPDATE materiales 
+    UPDATE materiales
     SET stock_actual = NEW.cantidad
     WHERE id = NEW.material_id;
+END;
+
+-- Registrar fecha real de recepcion al recibir orden
+CREATE TRIGGER registrar_recepcion_orden
+AFTER UPDATE ON ordenes_compra
+WHEN NEW.estado = 'entregada' AND OLD.estado != 'entregada'
+BEGIN
+    UPDATE ordenes_compra
+    SET fecha_recepcion_real = DATE('now')
+    WHERE id = NEW.id AND fecha_recepcion_real IS NULL;
 END;

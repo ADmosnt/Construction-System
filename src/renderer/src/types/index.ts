@@ -25,6 +25,9 @@ export interface Material {
   stock_maximo: number;
   precio_unitario: number;
   es_critico: boolean;
+  es_perecedero: boolean;
+  fecha_vencimiento: string | null;
+  dias_aviso_vencimiento: number;
   created_at: string;
   // Campos joined
   unidad_nombre?: string;
@@ -61,20 +64,25 @@ export interface Actividad {
 
 export interface Alerta {
   id: number;
-  proyecto_id: number;
-  material_id: number;
-  tipo: 'stock_minimo' | 'desabastecimiento_inminente' | 'reorden_sugerido';
+  proyecto_id: number | null;
+  material_id: number | null;
+  actividad_id: number | null;
+  tipo: 'stock_minimo' | 'desabastecimiento_inminente' | 'reorden_sugerido'
+    | 'desviacion_consumo' | 'stock_estancado' | 'vencimiento_material'
+    | 'variacion_precio' | 'dependencia_bloqueada';
   nivel: 'baja' | 'media' | 'alta' | 'critica';
   mensaje: string;
   dias_hasta_desabastecimiento: number | null;
-  cantidad_sugerida: number;
+  cantidad_sugerida: number | null;
   fecha_sugerida_pedido: string | null;
+  datos_extra: string | null;
   estado: 'pendiente' | 'atendida' | 'descartada';
   created_at: string;
   atendida_at: string | null;
   // Campos joined
   proyecto_nombre?: string;
   material_nombre?: string;
+  actividad_nombre?: string;
   material_stock_actual?: number;
   material_stock_minimo?: number;
   material_unidad_abrev?: string;
@@ -95,9 +103,34 @@ export interface MovimientoInventario {
   cantidad: number;
   motivo: string | null;
   responsable: string | null;
+  lote: string | null;
   fecha: string;
   // Campos joined
   proyecto_nombre?: string;
+}
+
+export interface ActividadDependencia {
+  id: number;
+  actividad_id: number;
+  actividad_precedente_id: number;
+  tipo_dependencia: 'FS' | 'SS' | 'FF' | 'SF';
+  dias_espera: number;
+  created_at: string;
+  // Campos joined
+  actividad_nombre?: string;
+  precedente_nombre?: string;
+  precedente_avance?: number;
+}
+
+export interface Usuario {
+  id: number;
+  username: string;
+  nombre_completo: string;
+  email: string | null;
+  rol: 'admin' | 'supervisor' | 'operador';
+  activo: boolean;
+  ultimo_login: string | null;
+  created_at: string;
 }
 
 export interface OrdenCompra {
@@ -106,6 +139,7 @@ export interface OrdenCompra {
   proyecto_id: number | null;
   fecha_emision: string;
   fecha_entrega_estimada: string | null;
+  fecha_recepcion_real: string | null;
   estado: 'pendiente' | 'confirmada' | 'en_transito' | 'entregada' | 'cancelada';
   total: number;
   notas: string | null;

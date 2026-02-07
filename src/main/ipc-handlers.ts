@@ -388,13 +388,18 @@ export function registerIpcHandlers(): void {
   
   ipcMain.handle('db:alertas:getAll', async () => {
     return dbHelpers.all(`
-      SELECT a.*, p.nombre as proyecto_nombre, m.nombre as material_nombre,
-             m.stock_actual as material_stock_actual, m.stock_minimo as material_stock_minimo,
-             u.abreviatura as material_unidad_abrev
+      SELECT a.*,
+             p.nombre as proyecto_nombre,
+             m.nombre as material_nombre,
+             m.stock_actual as material_stock_actual,
+             m.stock_minimo as material_stock_minimo,
+             u.abreviatura as material_unidad_abrev,
+             act.nombre as actividad_nombre
       FROM alertas a
-      JOIN proyectos p ON a.proyecto_id = p.id
-      JOIN materiales m ON a.material_id = m.id
+      LEFT JOIN proyectos p ON a.proyecto_id = p.id
+      LEFT JOIN materiales m ON a.material_id = m.id
       LEFT JOIN unidades_medida u ON m.unidad_medida_id = u.id
+      LEFT JOIN actividades act ON a.actividad_id = act.id
       WHERE a.estado = 'pendiente'
       ORDER BY
         CASE a.nivel
