@@ -334,6 +334,26 @@ export function registerIpcHandlers(): void {
         throw new Error('El avance no puede superar el 100%');
       }
 
+      // Validar dependencias (bloqueo)
+      const deps = dbHelpers.all<{ precedente_nombre: string; precedente_avance: number; tipo_dependencia: string }>(`
+        SELECT prec.nombre as precedente_nombre, prec.avance_real as precedente_avance, dep.tipo_dependencia
+        FROM actividad_dependencias dep
+        JOIN actividades prec ON dep.actividad_precedente_id = prec.id
+        WHERE dep.actividad_id = ?
+      `, [data.actividad_id]);
+
+      const bloqueadores: string[] = [];
+      for (const dep of deps) {
+        if (dep.tipo_dependencia === 'FS' && dep.precedente_avance < 100) {
+          bloqueadores.push(`"${dep.precedente_nombre}" (${dep.precedente_avance}%)`);
+        } else if ((dep.tipo_dependencia === 'SS' || dep.tipo_dependencia === 'SF') && dep.precedente_avance === 0) {
+          bloqueadores.push(`"${dep.precedente_nombre}" (no iniciada)`);
+        }
+      }
+      if (bloqueadores.length > 0) {
+        throw new Error(`Actividad bloqueada. Dependencias pendientes: ${bloqueadores.join(', ')}`);
+      }
+
       // Actualizar avance de la actividad
       dbHelpers.run(
         'UPDATE actividades SET avance_real = ? WHERE id = ?',

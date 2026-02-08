@@ -13,7 +13,8 @@ import type {
   Actividad,
   ResultadoSimulacion,
   MaterialActividad,
-  Material
+  Material,
+  ActividadDependencia
 } from '../types'
 
 export default function ProyectoDetallePage() {
@@ -43,6 +44,12 @@ export default function ProyectoDetallePage() {
   const [consumosReales, setConsumosReales] = useState<Record<number, number>>({})
   const [confirmandoAvance, setConfirmandoAvance] = useState(false)
 
+  // Dependencias
+  const [showDepsModal, setShowDepsModal] = useState(false)
+  const [depsActividad, setDepsActividad] = useState<Actividad | null>(null)
+  const [dependencias, setDependencias] = useState<ActividadDependencia[]>([])
+  const [bloqueos, setBloqueos] = useState<Record<number, string[]>>({})
+
   // Simulador
   const [showSimulador, setShowSimulador] = useState(false)
   const [avanceSimulado, setAvanceSimulado] = useState(0)
@@ -52,7 +59,7 @@ export default function ProyectoDetallePage() {
   useEffect(() => {
     if (id) {
       loadProyecto()
-      loadActividades()
+      loadActividades().then(() => loadBloqueos())
       loadTodosMateriales()
     }
   }, [id])
@@ -84,6 +91,64 @@ export default function ProyectoDetallePage() {
       setTodosMateriales(data)
     } catch (error) {
       console.error('Error loading materiales:', error)
+    }
+  }
+
+  const loadBloqueos = async () => {
+    try {
+      const acts = await db.actividades.getByProyecto(Number(id))
+      const newBloqueos: Record<number, string[]> = {}
+      for (const act of acts) {
+        const result = await db.dependencias.verificarBloqueo(act.id)
+        if (result.bloqueada) {
+          newBloqueos[act.id] = result.bloqueadores
+        }
+      }
+      setBloqueos(newBloqueos)
+    } catch (error) {
+      console.error('Error loading bloqueos:', error)
+    }
+  }
+
+  const handleVerDependencias = async (actividad: Actividad) => {
+    try {
+      const deps = await db.dependencias.getByActividad(actividad.id)
+      setDependencias(deps)
+      setDepsActividad(actividad)
+      setShowDepsModal(true)
+    } catch (error) {
+      console.error('Error loading dependencias:', error)
+    }
+  }
+
+  const handleAddDependencia = async (precedenteId: number, tipo: string) => {
+    if (!depsActividad) return
+    try {
+      await db.dependencias.create({
+        actividad_id: depsActividad.id,
+        actividad_precedente_id: precedenteId,
+        tipo_dependencia: tipo,
+        dias_espera: 0
+      })
+      const deps = await db.dependencias.getByActividad(depsActividad.id)
+      setDependencias(deps)
+      await loadBloqueos()
+      showToast('Dependencia agregada', 'success')
+    } catch (error: any) {
+      showToast(error.message || 'Error al agregar dependencia', 'error')
+    }
+  }
+
+  const handleDeleteDependencia = async (depId: number) => {
+    if (!depsActividad) return
+    try {
+      await db.dependencias.delete(depId)
+      const deps = await db.dependencias.getByActividad(depsActividad.id)
+      setDependencias(deps)
+      await loadBloqueos()
+      showToast('Dependencia eliminada', 'success')
+    } catch (error) {
+      showToast('Error al eliminar dependencia', 'error')
     }
   }
 
@@ -189,6 +254,17 @@ export default function ProyectoDetallePage() {
 
   const handleOpenAvanceModal = async (actividad: Actividad) => {
     try {
+      // Verificar bloqueo antes de abrir
+      const bloqueo = await db.dependencias.verificarBloqueo(actividad.id)
+      if (bloqueo.bloqueada) {
+        showToast(
+          'Actividad bloqueada',
+          'error',
+          `Dependencias sin completar: ${bloqueo.bloqueadores.join(', ')}`
+        )
+        return
+      }
+
       const mats = await db.actividades.getMateriales(actividad.id)
       setAvanceActividad(actividad)
       setAvanceMateriales(mats)
@@ -290,6 +366,7 @@ export default function ProyectoDetallePage() {
 
       // Recalcular avance del proyecto
       await loadActividades()
+      await loadBloqueos()
       const acts = await db.actividades.getByProyecto(Number(id))
       const avancePromedio = acts.reduce((sum, act) => sum + act.avance_real, 0) / acts.length
       await db.proyectos.update(Number(id), {
@@ -714,6 +791,8 @@ export default function ProyectoDetallePage() {
               <div className="space-y-4">
                 {actividades.map((actividad) => {
                   const isCompleta = actividad.avance_real >= 100
+                  const isBloqueada = !!bloqueos[actividad.id]
+                  const bloqueadaPor = bloqueos[actividad.id] || []
 
                   return (
                     <div
@@ -721,7 +800,9 @@ export default function ProyectoDetallePage() {
                       className={`border rounded-lg p-4 transition-shadow ${
                         isCompleta
                           ? 'border-green-300 bg-green-50'
-                          : 'border-gray-200 hover:shadow-md'
+                          : isBloqueada
+                            ? 'border-red-300 bg-red-50'
+                            : 'border-gray-200 hover:shadow-md'
                       }`}
                     >
                       <div className="flex items-start justify-between mb-3">
@@ -736,12 +817,29 @@ export default function ProyectoDetallePage() {
                                 COMPLETADA
                               </span>
                             )}
+                            {isBloqueada && !isCompleta && (
+                              <span className="px-2 py-0.5 bg-red-200 text-red-800 text-xs font-bold rounded-full">
+                                BLOQUEADA
+                              </span>
+                            )}
                           </div>
                           {actividad.descripcion && (
                             <p className="text-sm text-gray-600">{actividad.descripcion}</p>
                           )}
+                          {isBloqueada && !isCompleta && (
+                            <p className="text-xs text-red-600 mt-1">
+                              Esperando: {bloqueadaPor.join(', ')}
+                            </p>
+                          )}
                         </div>
                         <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => handleVerDependencias(actividad)}
+                          >
+                            Deps
+                          </Button>
                           <Button
                             size="sm"
                             variant="ghost"
@@ -818,6 +916,12 @@ export default function ProyectoDetallePage() {
                           <p className="text-sm text-green-800 font-semibold">
                             Actividad completada al 100%. Revise los materiales para verificar el
                             consumo final.
+                          </p>
+                        </div>
+                      ) : isBloqueada ? (
+                        <div className="bg-red-100 border border-red-300 rounded-lg p-3 text-center">
+                          <p className="text-sm text-red-800 font-semibold">
+                            Actividad bloqueada por dependencias sin completar.
                           </p>
                         </div>
                       ) : (
@@ -1413,6 +1517,147 @@ export default function ProyectoDetallePage() {
             </Button>
           </div>
         </form>
+      </Modal>
+
+      {/* Modal de Dependencias */}
+      <Modal
+        isOpen={showDepsModal}
+        onClose={() => {
+          setShowDepsModal(false)
+          setDepsActividad(null)
+          setDependencias([])
+        }}
+        title={`Dependencias - ${depsActividad?.nombre || ''}`}
+        size="lg"
+      >
+        <div className="space-y-4">
+          {/* Lista de dependencias actuales */}
+          {dependencias.length === 0 ? (
+            <div className="text-center py-6 bg-gray-50 rounded-lg">
+              <p className="text-gray-500">Esta actividad no tiene dependencias definidas.</p>
+              <p className="text-xs text-gray-400 mt-1">
+                Puede avanzar libremente sin esperar otras actividades.
+              </p>
+            </div>
+          ) : (
+            <div>
+              <h4 className="text-sm font-semibold text-gray-700 mb-2">
+                Antes de avanzar esta actividad, se requiere:
+              </h4>
+              <div className="space-y-2">
+                {dependencias.map((dep) => {
+                  const avance = dep.precedente_avance || 0
+                  const tipoLabel = dep.tipo_dependencia === 'FS' ? 'Debe terminar (100%)'
+                    : dep.tipo_dependencia === 'SS' ? 'Debe iniciar (>0%)'
+                    : dep.tipo_dependencia === 'FF' ? 'Debe terminar junto'
+                    : 'Debe iniciar antes de terminar'
+                  const cumple = dep.tipo_dependencia === 'FS' ? avance >= 100
+                    : dep.tipo_dependencia === 'SS' ? avance > 0
+                    : dep.tipo_dependencia === 'SF' ? avance > 0
+                    : avance >= 100
+
+                  return (
+                    <div
+                      key={dep.id}
+                      className={`flex items-center justify-between p-3 rounded-lg border ${
+                        cumple ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'
+                      }`}
+                    >
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className={`text-lg ${cumple ? 'text-green-600' : 'text-red-500'}`}>
+                            {cumple ? '\u2705' : '\u274C'}
+                          </span>
+                          <span className="font-medium text-sm">{dep.precedente_nombre}</span>
+                          <span className="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded">
+                            {dep.tipo_dependencia}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3 mt-1 ml-7">
+                          <span className="text-xs text-gray-500">{tipoLabel}</span>
+                          <span className={`text-xs font-bold ${cumple ? 'text-green-700' : 'text-red-700'}`}>
+                            Avance actual: {avance}%
+                          </span>
+                        </div>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => handleDeleteDependencia(dep.id)}
+                      >
+                        Quitar
+                      </Button>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Agregar nueva dependencia */}
+          <div className="border-t pt-4">
+            <h4 className="text-sm font-semibold text-gray-700 mb-3">Agregar dependencia</h4>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault()
+                const formData = new FormData(e.currentTarget)
+                const precedenteId = parseInt(formData.get('precedente_id') as string)
+                const tipo = formData.get('tipo_dep') as string
+                if (precedenteId && tipo) {
+                  handleAddDependencia(precedenteId, tipo)
+                  e.currentTarget.reset()
+                }
+              }}
+              className="flex items-end gap-3"
+            >
+              <div className="flex-1">
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Actividad precedente
+                </label>
+                <select
+                  name="precedente_id"
+                  required
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">Seleccionar...</option>
+                  {actividades
+                    .filter((a) => a.id !== depsActividad?.id && !dependencias.some((d) => d.actividad_precedente_id === a.id))
+                    .map((a) => (
+                      <option key={a.id} value={a.id}>
+                        #{a.orden} {a.nombre} ({a.avance_real}%)
+                      </option>
+                    ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Tipo
+                </label>
+                <select
+                  name="tipo_dep"
+                  required
+                  className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="FS">FS (Fin a Inicio)</option>
+                  <option value="SS">SS (Inicio a Inicio)</option>
+                  <option value="FF">FF (Fin a Fin)</option>
+                  <option value="SF">SF (Inicio a Fin)</option>
+                </select>
+              </div>
+              <Button type="submit" size="sm">
+                Agregar
+              </Button>
+            </form>
+            <div className="mt-3 bg-blue-50 border border-blue-200 rounded-lg p-3">
+              <p className="text-xs text-blue-700">
+                <strong>FS (Fin a Inicio):</strong> La precedente debe completarse al 100% antes de avanzar esta actividad.
+              </p>
+              <p className="text-xs text-blue-700 mt-1">
+                <strong>SS (Inicio a Inicio):</strong> La precedente debe haber iniciado (avance {'>'} 0%) para poder iniciar esta.
+              </p>
+            </div>
+          </div>
+        </div>
       </Modal>
     </div>
   )
