@@ -1,6 +1,6 @@
 // src/render/src/App.tsx
 
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Layout from './components/layout/Layout';
 import ToastContainer from './components/ui/Toast';
@@ -16,9 +16,27 @@ import ConfiguracionPage from './routes/ConfiguracionPage';
 import LoginPage from './routes/LoginPage';
 import SetupWizardPage from './routes/SetupWizardPage';
 import RecoveryPage from './routes/RecoveryPage';
+import { useEffect, useRef } from 'react';
 
 function AppRoutes() {
   const { isAuthenticated, isFirstUse, loading } = useAuth();
+  const navigate = useNavigate();
+  const prevAuth = useRef(isAuthenticated);
+
+  // Navegar a "/" cada vez que el estado de autenticacion cambia
+  useEffect(() => {
+    if (!loading && prevAuth.current !== isAuthenticated) {
+      prevAuth.current = isAuthenticated;
+      navigate('/', { replace: true });
+    }
+  }, [isAuthenticated, loading, navigate]);
+
+  // Navegar a "/" cuando se completa el setup (isFirstUse pasa de true a false)
+  useEffect(() => {
+    if (!loading && !isFirstUse && isAuthenticated) {
+      navigate('/', { replace: true });
+    }
+  }, [isFirstUse, loading, isAuthenticated, navigate]);
 
   if (loading) {
     return (
@@ -66,6 +84,7 @@ function AppRoutes() {
         <Route path="inventario" element={<InventarioPage />} />
         <Route path="ordenes" element={<OrdenesPage />} />
         <Route path="configuracion" element={<ConfiguracionPage />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>
   );
