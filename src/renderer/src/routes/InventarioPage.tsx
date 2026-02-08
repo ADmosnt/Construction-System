@@ -4,11 +4,11 @@ import { useState, useEffect } from 'react';
 import Header from '../components/layout/Header';
 import InventarioChart from '../components/charts/InventarioChart';
 import { db } from '../lib/database';
-import type { Material, MovimientoInventario } from '../types';
+import type { Material } from '../types';
 
 export default function InventarioPage() {
   const [materiales, setMateriales] = useState<Material[]>([]);
-  const [movimientos, setMovimientos] = useState<MovimientoInventario[]>([]);
+
   const [loading, setLoading] = useState(true);
   const [filtro, setFiltro] = useState<'todos' | 'criticos' | 'bajos' | 'ok'>('todos');
   const [busqueda, setBusqueda] = useState('');

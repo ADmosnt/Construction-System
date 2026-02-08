@@ -147,9 +147,18 @@ export interface Usuario {
   nombre_completo: string;
   email: string | null;
   rol: 'admin' | 'supervisor' | 'operador';
+  pregunta_seguridad_1: string;
+  pregunta_seguridad_2: string;
   activo: boolean;
   ultimo_login: string | null;
   created_at: string;
+}
+
+export interface AuthUser {
+  id: number;
+  username: string;
+  nombre_completo: string;
+  rol: 'admin' | 'supervisor' | 'operador';
 }
 
 export interface OrdenCompra {

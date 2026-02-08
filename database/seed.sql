@@ -1,10 +1,8 @@
 -- SEED DATA: Datos de prueba para el sistema v2.0
 
--- Usuario admin por defecto (password sera configurado en el login)
--- Hash placeholder: se reemplazara cuando se implemente el modulo de login
-INSERT INTO usuarios (username, password_hash, nombre_completo, email, rol, activo) VALUES
-('admin', '$placeholder$admin', 'Administrador del Sistema', 'admin@proig.com', 'admin', 1),
-('supervisor1', '$placeholder$super', 'Carlos Mendez', 'cmendez@proig.com', 'supervisor', 1);
+-- NOTA: La tabla usuarios se deja VACIA intencionalmente.
+-- Al primer inicio, la app detecta que no hay usuarios y muestra
+-- un wizard de configuracion para crear la cuenta de administrador.
 
 -- Unidades de medida
 INSERT INTO unidades_medida (nombre, abreviatura, tipo) VALUES

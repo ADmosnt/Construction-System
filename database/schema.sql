@@ -4,14 +4,18 @@
 -- =====================================================================
 
 -- TABLA: usuarios
--- Sistema de autenticacion y control de acceso
+-- Sistema de autenticacion y control de acceso con preguntas de seguridad
 CREATE TABLE usuarios (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
     nombre_completo TEXT NOT NULL,
     email TEXT,
-    rol TEXT DEFAULT 'operador' CHECK(rol IN ('admin', 'supervisor', 'operador')),
+    rol TEXT DEFAULT 'admin' CHECK(rol IN ('admin', 'supervisor', 'operador')),
+    pregunta_seguridad_1 TEXT NOT NULL,
+    respuesta_hash_1 TEXT NOT NULL,
+    pregunta_seguridad_2 TEXT NOT NULL,
+    respuesta_hash_2 TEXT NOT NULL,
     activo BOOLEAN DEFAULT 1,
     ultimo_login DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP

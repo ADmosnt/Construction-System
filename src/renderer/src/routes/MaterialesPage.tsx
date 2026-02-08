@@ -263,8 +263,7 @@ export default function MaterialesPage() {
               </thead>
               <tbody className="divide-y divide-gray-200">
                 {materialesFiltrados.map((material) => {
-                  const porcentaje = (material.stock_actual / material.stock_minimo) * 100;
-                  const estado = material.stock_actual < material.stock_minimo ? 'BAJO' : 
+                  const estado = material.stock_actual < material.stock_minimo ? 'BAJO' :
                                material.stock_actual < material.stock_minimo * 1.2 ? 'ALERTA' : 'OK';
                   const colorEstado = estado === 'BAJO' ? 'bg-red-100 text-red-700' : 
                                     estado === 'ALERTA' ? 'bg-yellow-100 text-yellow-700' : 

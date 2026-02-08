@@ -4,6 +4,7 @@ import { ipcMain } from 'electron';
 import { dbHelpers } from './database';
 import { generarAlertasProyecto, generarAlertasGlobales } from './alerts';
 import { simularConsumoProyecto } from './simulator';
+import bcrypt from 'bcryptjs';
 
 /**
  * FEFO: Descuenta stock del lote más próximo a vencer primero.
@@ -47,7 +48,187 @@ function descontarFEFO(materialId: number, cantidadTotal: number): Array<{ lote_
  * Registra todos los handlers IPC para comunicación con el renderer
  */
 export function registerIpcHandlers(): void {
-  
+
+  // ==================== AUTENTICACION ====================
+
+  // Verificar si existe algun usuario (primer uso)
+  ipcMain.handle('auth:checkSetup', async () => {
+    const user = dbHelpers.get<{ count: number }>('SELECT COUNT(*) as count FROM usuarios');
+    return { needsSetup: !user || user.count === 0 };
+  });
+
+  // Crear cuenta de administrador (primer uso / wizard)
+  ipcMain.handle('auth:setup', async (_, data: {
+    username: string;
+    password: string;
+    nombre_completo: string;
+    pregunta_seguridad_1: string;
+    respuesta_1: string;
+    pregunta_seguridad_2: string;
+    respuesta_2: string;
+  }) => {
+    // Verificar que no existan usuarios aun
+    const existing = dbHelpers.get<{ count: number }>('SELECT COUNT(*) as count FROM usuarios');
+    if (existing && existing.count > 0) {
+      throw new Error('Ya existe un usuario configurado en el sistema.');
+    }
+
+    const passwordHash = bcrypt.hashSync(data.password, 10);
+    const respuestaHash1 = bcrypt.hashSync(data.respuesta_1.trim().toLowerCase(), 10);
+    const respuestaHash2 = bcrypt.hashSync(data.respuesta_2.trim().toLowerCase(), 10);
+
+    const result = dbHelpers.run(
+      `INSERT INTO usuarios (username, password_hash, nombre_completo, rol, pregunta_seguridad_1, respuesta_hash_1, pregunta_seguridad_2, respuesta_hash_2)
+       VALUES (?, ?, ?, 'admin', ?, ?, ?, ?)`,
+      [data.username, passwordHash, data.nombre_completo,
+       data.pregunta_seguridad_1, respuestaHash1,
+       data.pregunta_seguridad_2, respuestaHash2]
+    );
+
+    return {
+      id: result.lastInsertRowid,
+      username: data.username,
+      nombre_completo: data.nombre_completo,
+      rol: 'admin'
+    };
+  });
+
+  // Iniciar sesion
+  ipcMain.handle('auth:login', async (_, username: string, password: string) => {
+    const user = dbHelpers.get<{
+      id: number; username: string; password_hash: string;
+      nombre_completo: string; rol: string; activo: number;
+    }>('SELECT * FROM usuarios WHERE username = ?', [username]);
+
+    if (!user) {
+      throw new Error('Usuario o contraseña incorrectos.');
+    }
+
+    if (!user.activo) {
+      throw new Error('Esta cuenta esta desactivada.');
+    }
+
+    const valid = bcrypt.compareSync(password, user.password_hash);
+    if (!valid) {
+      throw new Error('Usuario o contraseña incorrectos.');
+    }
+
+    // Actualizar ultimo_login
+    dbHelpers.run('UPDATE usuarios SET ultimo_login = CURRENT_TIMESTAMP WHERE id = ?', [user.id]);
+
+    return {
+      id: user.id,
+      username: user.username,
+      nombre_completo: user.nombre_completo,
+      rol: user.rol
+    };
+  });
+
+  // Obtener preguntas de seguridad para recuperacion
+  ipcMain.handle('auth:getSecurityQuestions', async (_, username: string) => {
+    const user = dbHelpers.get<{
+      id: number; pregunta_seguridad_1: string; pregunta_seguridad_2: string;
+    }>('SELECT id, pregunta_seguridad_1, pregunta_seguridad_2 FROM usuarios WHERE username = ? AND activo = 1', [username]);
+
+    if (!user) {
+      throw new Error('Usuario no encontrado.');
+    }
+
+    return {
+      userId: user.id,
+      pregunta1: user.pregunta_seguridad_1,
+      pregunta2: user.pregunta_seguridad_2
+    };
+  });
+
+  // Recuperar contraseña con preguntas de seguridad
+  ipcMain.handle('auth:recover', async (_, data: {
+    username: string;
+    respuesta_1: string;
+    respuesta_2: string;
+    new_password: string;
+  }) => {
+    const user = dbHelpers.get<{
+      id: number; respuesta_hash_1: string; respuesta_hash_2: string;
+    }>('SELECT id, respuesta_hash_1, respuesta_hash_2 FROM usuarios WHERE username = ? AND activo = 1', [data.username]);
+
+    if (!user) {
+      throw new Error('Usuario no encontrado.');
+    }
+
+    const r1Valid = bcrypt.compareSync(data.respuesta_1.trim().toLowerCase(), user.respuesta_hash_1);
+    const r2Valid = bcrypt.compareSync(data.respuesta_2.trim().toLowerCase(), user.respuesta_hash_2);
+
+    if (!r1Valid || !r2Valid) {
+      throw new Error('Las respuestas de seguridad no coinciden.');
+    }
+
+    const newHash = bcrypt.hashSync(data.new_password, 10);
+    dbHelpers.run('UPDATE usuarios SET password_hash = ? WHERE id = ?', [newHash, user.id]);
+
+    return { success: true };
+  });
+
+  // Cambiar contraseña (estando logueado)
+  ipcMain.handle('auth:changePassword', async (_, data: {
+    userId: number;
+    current_password: string;
+    new_password: string;
+  }) => {
+    const user = dbHelpers.get<{ id: number; password_hash: string }>(
+      'SELECT id, password_hash FROM usuarios WHERE id = ?', [data.userId]
+    );
+
+    if (!user) {
+      throw new Error('Usuario no encontrado.');
+    }
+
+    const valid = bcrypt.compareSync(data.current_password, user.password_hash);
+    if (!valid) {
+      throw new Error('La contraseña actual es incorrecta.');
+    }
+
+    const newHash = bcrypt.hashSync(data.new_password, 10);
+    dbHelpers.run('UPDATE usuarios SET password_hash = ? WHERE id = ?', [newHash, user.id]);
+
+    return { success: true };
+  });
+
+  // Cambiar preguntas de seguridad (estando logueado)
+  ipcMain.handle('auth:changeSecurityQuestions', async (_, data: {
+    userId: number;
+    current_password: string;
+    pregunta_seguridad_1: string;
+    respuesta_1: string;
+    pregunta_seguridad_2: string;
+    respuesta_2: string;
+  }) => {
+    const user = dbHelpers.get<{ id: number; password_hash: string }>(
+      'SELECT id, password_hash FROM usuarios WHERE id = ?', [data.userId]
+    );
+
+    if (!user) {
+      throw new Error('Usuario no encontrado.');
+    }
+
+    const valid = bcrypt.compareSync(data.current_password, user.password_hash);
+    if (!valid) {
+      throw new Error('La contraseña es incorrecta.');
+    }
+
+    const respuestaHash1 = bcrypt.hashSync(data.respuesta_1.trim().toLowerCase(), 10);
+    const respuestaHash2 = bcrypt.hashSync(data.respuesta_2.trim().toLowerCase(), 10);
+
+    dbHelpers.run(
+      `UPDATE usuarios SET pregunta_seguridad_1 = ?, respuesta_hash_1 = ?,
+       pregunta_seguridad_2 = ?, respuesta_hash_2 = ? WHERE id = ?`,
+      [data.pregunta_seguridad_1, respuestaHash1,
+       data.pregunta_seguridad_2, respuestaHash2, user.id]
+    );
+
+    return { success: true };
+  });
+
   // ==================== PROYECTOS ====================
   
   ipcMain.handle('db:proyectos:getAll', async () => {

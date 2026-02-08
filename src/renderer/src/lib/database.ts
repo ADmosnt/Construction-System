@@ -14,13 +14,69 @@ import type {
   ResultadoSimulacion,
   MaterialActividad,
   ConsumoConfirmacion,
-  ActividadDependencia
+  ActividadDependencia,
+  AuthUser
 } from '../types';
 
 // Cliente de base de datos para el renderer process
 // Usa IPC para comunicarse con el main process
 
 export const db = {
+  // ==================== AUTENTICACION ====================
+  auth: {
+    checkSetup: async (): Promise<{ needsSetup: boolean }> => {
+      return window.electron.ipcRenderer.invoke('auth:checkSetup');
+    },
+
+    setup: async (data: {
+      username: string;
+      password: string;
+      nombre_completo: string;
+      pregunta_seguridad_1: string;
+      respuesta_1: string;
+      pregunta_seguridad_2: string;
+      respuesta_2: string;
+    }): Promise<AuthUser> => {
+      return window.electron.ipcRenderer.invoke('auth:setup', data);
+    },
+
+    login: async (username: string, password: string): Promise<AuthUser> => {
+      return window.electron.ipcRenderer.invoke('auth:login', username, password);
+    },
+
+    getSecurityQuestions: async (username: string): Promise<{ userId: number; pregunta1: string; pregunta2: string }> => {
+      return window.electron.ipcRenderer.invoke('auth:getSecurityQuestions', username);
+    },
+
+    recover: async (data: {
+      username: string;
+      respuesta_1: string;
+      respuesta_2: string;
+      new_password: string;
+    }): Promise<{ success: boolean }> => {
+      return window.electron.ipcRenderer.invoke('auth:recover', data);
+    },
+
+    changePassword: async (userId: number, currentPassword: string, newPassword: string): Promise<{ success: boolean }> => {
+      return window.electron.ipcRenderer.invoke('auth:changePassword', {
+        userId,
+        current_password: currentPassword,
+        new_password: newPassword
+      });
+    },
+
+    changeSecurityQuestions: async (data: {
+      userId: number;
+      current_password: string;
+      pregunta_seguridad_1: string;
+      respuesta_1: string;
+      pregunta_seguridad_2: string;
+      respuesta_2: string;
+    }): Promise<{ success: boolean }> => {
+      return window.electron.ipcRenderer.invoke('auth:changeSecurityQuestions', data);
+    }
+  },
+
   // ==================== PROYECTOS ====================
   proyectos: {
     getAll: async (): Promise<Proyecto[]> => {
