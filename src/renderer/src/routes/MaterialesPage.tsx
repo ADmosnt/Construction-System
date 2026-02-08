@@ -7,7 +7,7 @@ import Modal from '../components/ui/Modal';
 import Input from '../components/ui/Input';
 import { showToast } from '../components/ui/Toast';
 import { db } from '../lib/database';
-import type { Material, Proveedor, UnidadMedida, MovimientoInventario } from '../types';
+import type { Material, Proveedor, UnidadMedida, MovimientoInventario, LoteInventario } from '../types';
 
 export default function MaterialesPage() {
   const [materiales, setMateriales] = useState<Material[]>([]);
@@ -20,6 +20,9 @@ export default function MaterialesPage() {
   const [editingMaterial, setEditingMaterial] = useState<Material | null>(null);
   const [selectedMaterial, setSelectedMaterial] = useState<Material | null>(null);
   const [movimientos, setMovimientos] = useState<MovimientoInventario[]>([]);
+  const [showLotesModal, setShowLotesModal] = useState(false);
+  const [lotes, setLotes] = useState<LoteInventario[]>([]);
+  const [editingLote, setEditingLote] = useState<LoteInventario | null>(null);
   const [filtro, setFiltro] = useState<'todos' | 'criticos' | 'bajos' | 'perecederos'>('todos');
 
   useEffect(() => {
@@ -86,24 +89,66 @@ export default function MaterialesPage() {
     if (!selectedMaterial) return;
 
     const formData = new FormData(e.currentTarget);
-    const movimientoData = {
+    const tipo = formData.get('tipo') as 'entrada' | 'salida' | 'ajuste';
+    const movimientoData: any = {
       material_id: selectedMaterial.id,
-      tipo: formData.get('tipo') as 'entrada' | 'salida' | 'ajuste',
+      tipo,
       cantidad: parseFloat(formData.get('cantidad') as string),
       motivo: formData.get('motivo') as string,
       responsable: formData.get('responsable') as string,
       proyecto_id: null
     };
 
+    // Para entradas de perecederos: incluir datos del lote
+    if (selectedMaterial.es_perecedero && tipo === 'entrada') {
+      movimientoData.lote_codigo = formData.get('lote_codigo') as string || undefined;
+      movimientoData.fecha_vencimiento = formData.get('fecha_vencimiento_lote') as string || undefined;
+      movimientoData.notas_lote = formData.get('notas_lote') as string || undefined;
+    }
+
     try {
       await db.movimientos.create(movimientoData);
       await loadData();
       setShowMovimientoModal(false);
       setSelectedMaterial(null);
-      showToast('Movimiento de inventario registrado', 'success', `${movimientoData.tipo.charAt(0).toUpperCase() + movimientoData.tipo.slice(1)} de ${movimientoData.cantidad} unidades.`);
+      const tipoLabel = tipo === 'salida' && selectedMaterial.es_perecedero
+        ? 'Salida FEFO (lote mas viejo primero)'
+        : `${tipo.charAt(0).toUpperCase() + tipo.slice(1)}`;
+      showToast('Movimiento registrado', 'success', `${tipoLabel} de ${movimientoData.cantidad} unidades.`);
     } catch (error) {
       console.error('Error saving movimiento:', error);
       showToast('Error al registrar el movimiento', 'error');
+    }
+  };
+
+  const handleVerLotes = async (material: Material) => {
+    try {
+      const lotesData = await db.lotes.getByMaterial(material.id);
+      setLotes(lotesData);
+      setSelectedMaterial(material);
+      setShowLotesModal(true);
+    } catch (error) {
+      console.error('Error loading lotes:', error);
+    }
+  };
+
+  const handleSaveLote = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!selectedMaterial || !editingLote) return;
+    const formData = new FormData(e.currentTarget);
+    try {
+      await db.lotes.update(editingLote.id, {
+        codigo_lote: formData.get('codigo_lote') as string,
+        fecha_vencimiento: formData.get('fecha_vencimiento_edit') as string || null,
+        notas: formData.get('notas') as string || null,
+      });
+      const lotesData = await db.lotes.getByMaterial(selectedMaterial.id);
+      setLotes(lotesData);
+      setEditingLote(null);
+      showToast('Lote actualizado', 'success');
+    } catch (error) {
+      console.error('Error updating lote:', error);
+      showToast('Error al actualizar el lote', 'error');
     }
   };
 
@@ -251,29 +296,15 @@ export default function MaterialesPage() {
                         </span>
                       </td>
                       <td className="px-6 py-4 text-center">
-                        {material.es_perecedero ? (() => {
-                          if (!material.fecha_vencimiento) {
-                            return <span className="text-xs text-orange-500">Perecedero (sin fecha)</span>;
-                          }
-                          const diasRestantes = Math.ceil(
-                            (new Date(material.fecha_vencimiento).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
-                          );
-                          if (diasRestantes < 0) {
-                            return <span className="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-700">VENCIDO</span>;
-                          }
-                          if (diasRestantes <= (material.dias_aviso_vencimiento || 15)) {
-                            return (
-                              <span className="px-2 py-1 text-xs font-semibold rounded-full bg-orange-100 text-orange-700">
-                                Vence en {diasRestantes}d
-                              </span>
-                            );
-                          }
-                          return (
-                            <span className="text-xs text-gray-500">
-                              {new Date(material.fecha_vencimiento).toLocaleDateString()}
-                            </span>
-                          );
-                        })() : (
+                        {material.es_perecedero ? (
+                          <button
+                            onClick={() => handleVerLotes(material)}
+                            className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-full bg-orange-100 text-orange-700 hover:bg-orange-200 transition-colors"
+                            title="Ver lotes de este material"
+                          >
+                            Ver Lotes
+                          </button>
+                        ) : (
                           <span className="text-xs text-gray-400">-</span>
                         )}
                       </td>
@@ -559,6 +590,38 @@ export default function MaterialesPage() {
               placeholder="Nombre del responsable"
             />
 
+            {/* Campos de lote para entradas de perecederos */}
+            {selectedMaterial?.es_perecedero && (
+              <div id="lote-entrada-fields" className="p-4 bg-orange-50 border border-orange-200 rounded-lg space-y-3">
+                <p className="text-sm font-medium text-orange-700">Datos del Lote (para entradas de material perecedero)</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <Input
+                    name="lote_codigo"
+                    label="Codigo de Lote"
+                    placeholder="Ej: CEM-GR-2026-03"
+                  />
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Fecha Vencimiento del Lote
+                    </label>
+                    <input
+                      type="date"
+                      name="fecha_vencimiento_lote"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    />
+                  </div>
+                </div>
+                <Input
+                  name="notas_lote"
+                  label="Notas del lote"
+                  placeholder="Ej: Proveedor X, Factura #123"
+                />
+                <p className="text-xs text-orange-600">
+                  Las salidas se descuentan automaticamente del lote mas proximo a vencer (FEFO).
+                </p>
+              </div>
+            )}
+
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
               <p className="text-sm text-blue-800">
                 <strong>Stock actual:</strong> {selectedMaterial?.stock_actual.toFixed(2)} {selectedMaterial?.unidad_abrev}
@@ -614,11 +677,163 @@ export default function MaterialesPage() {
                   </span>
                 </div>
                 <div className="text-xs text-gray-500 flex items-center gap-4">
-                  <span>📅 {new Date(mov.fecha).toLocaleString()}</span>
-                  <span>👤 {mov.responsable}</span>
+                  <span>{new Date(mov.fecha).toLocaleString()}</span>
+                  <span>{mov.responsable}</span>
+                  {mov.lote_codigo && (
+                    <span className="px-1.5 py-0.5 bg-orange-100 text-orange-700 rounded text-xs">
+                      {mov.lote_codigo}
+                    </span>
+                  )}
                 </div>
               </div>
             ))}
+          </div>
+        )}
+      </Modal>
+
+      {/* Modal de Lotes */}
+      <Modal
+        isOpen={showLotesModal}
+        onClose={() => {
+          setShowLotesModal(false);
+          setSelectedMaterial(null);
+          setLotes([]);
+          setEditingLote(null);
+        }}
+        title={`Lotes de Inventario - ${selectedMaterial?.nombre}`}
+        size="lg"
+      >
+        {editingLote ? (
+          <form onSubmit={handleSaveLote}>
+            <div className="space-y-4">
+              <Input
+                name="codigo_lote"
+                label="Codigo de Lote"
+                defaultValue={editingLote.codigo_lote || ''}
+              />
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Fecha de Vencimiento
+                </label>
+                <input
+                  type="date"
+                  name="fecha_vencimiento_edit"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  defaultValue={editingLote.fecha_vencimiento || ''}
+                />
+              </div>
+              <Input
+                name="notas"
+                label="Notas"
+                defaultValue={editingLote.notas || ''}
+              />
+              <div className="bg-gray-50 rounded p-3 text-sm">
+                <p><strong>Cantidad actual:</strong> {editingLote.cantidad_actual} / {editingLote.cantidad_inicial} (inicial)</p>
+                <p><strong>Fecha ingreso:</strong> {new Date(editingLote.fecha_ingreso).toLocaleDateString()}</p>
+              </div>
+            </div>
+            <div className="flex gap-3 mt-6 pt-4 border-t border-gray-200">
+              <Button type="submit" className="flex-1">Guardar Cambios</Button>
+              <Button type="button" variant="ghost" onClick={() => setEditingLote(null)}>
+                Volver
+              </Button>
+            </div>
+          </form>
+        ) : (
+          <div>
+            {/* Resumen */}
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+              <div className="flex justify-between items-center">
+                <div>
+                  <p className="text-sm text-blue-800">
+                    <strong>Stock Total:</strong> {selectedMaterial?.stock_actual.toFixed(2)} {selectedMaterial?.unidad_abrev}
+                  </p>
+                  <p className="text-xs text-blue-600 mt-1">
+                    Distribuido en {lotes.length} lote{lotes.length !== 1 ? 's' : ''}
+                  </p>
+                </div>
+                <p className="text-xs text-blue-600">
+                  Las salidas consumen primero el lote mas proximo a vencer (FEFO)
+                </p>
+              </div>
+            </div>
+
+            {lotes.length === 0 ? (
+              <p className="text-center text-gray-500 py-8">No hay lotes registrados para este material</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Lote</th>
+                      <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase">Cantidad</th>
+                      <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase">Vencimiento</th>
+                      <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase">Estado</th>
+                      <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {lotes.map((lote) => {
+                      const diasRestantes = lote.fecha_vencimiento
+                        ? Math.ceil((new Date(lote.fecha_vencimiento).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+                        : null;
+                      const estadoLote = lote.cantidad_actual <= 0 ? 'AGOTADO'
+                        : diasRestantes !== null && diasRestantes <= 0 ? 'VENCIDO'
+                        : diasRestantes !== null && diasRestantes <= 7 ? 'POR VENCER'
+                        : diasRestantes !== null && diasRestantes <= (selectedMaterial?.dias_aviso_vencimiento || 15) ? 'PRONTO'
+                        : 'OK';
+                      const colorLote = estadoLote === 'VENCIDO' ? 'bg-red-100 text-red-700'
+                        : estadoLote === 'POR VENCER' ? 'bg-orange-100 text-orange-700'
+                        : estadoLote === 'PRONTO' ? 'bg-yellow-100 text-yellow-700'
+                        : estadoLote === 'AGOTADO' ? 'bg-gray-100 text-gray-500'
+                        : 'bg-green-100 text-green-700';
+
+                      return (
+                        <tr key={lote.id} className={`${lote.cantidad_actual <= 0 ? 'opacity-50' : ''}`}>
+                          <td className="px-3 py-3">
+                            <p className="font-medium">{lote.codigo_lote || `Lote #${lote.id}`}</p>
+                            <p className="text-xs text-gray-500">Ingreso: {new Date(lote.fecha_ingreso).toLocaleDateString()}</p>
+                            {lote.notas && <p className="text-xs text-gray-400">{lote.notas}</p>}
+                          </td>
+                          <td className="px-3 py-3 text-center">
+                            <p className="font-bold">{lote.cantidad_actual.toFixed(1)}</p>
+                            <p className="text-xs text-gray-400">de {lote.cantidad_inicial.toFixed(1)}</p>
+                          </td>
+                          <td className="px-3 py-3 text-center">
+                            {lote.fecha_vencimiento ? (
+                              <div>
+                                <p className="text-sm">{new Date(lote.fecha_vencimiento).toLocaleDateString()}</p>
+                                {diasRestantes !== null && (
+                                  <p className={`text-xs ${diasRestantes <= 0 ? 'text-red-600 font-bold' : diasRestantes <= 7 ? 'text-orange-600' : 'text-gray-500'}`}>
+                                    {diasRestantes <= 0 ? `Vencido hace ${Math.abs(diasRestantes)}d` : `${diasRestantes} dias`}
+                                  </p>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-xs text-gray-400">Sin fecha</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-3 text-center">
+                            <span className={`px-2 py-1 text-xs font-semibold rounded-full ${colorLote}`}>
+                              {estadoLote}
+                            </span>
+                          </td>
+                          <td className="px-3 py-3 text-center">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => setEditingLote(lote)}
+                            >
+                              Editar
+                            </Button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
       </Modal>

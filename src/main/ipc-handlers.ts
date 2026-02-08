@@ -6,6 +6,44 @@ import { generarAlertasProyecto, generarAlertasGlobales } from './alerts';
 import { simularConsumoProyecto } from './simulator';
 
 /**
+ * FEFO: Descuenta stock del lote más próximo a vencer primero.
+ * Retorna los lote_ids afectados para registrar en movimientos.
+ */
+function descontarFEFO(materialId: number, cantidadTotal: number): Array<{ lote_id: number; cantidad: number; codigo_lote: string }> {
+  const lotes = dbHelpers.all<{
+    id: number; codigo_lote: string; cantidad_actual: number; fecha_vencimiento: string | null;
+  }>(`
+    SELECT id, codigo_lote, cantidad_actual, fecha_vencimiento
+    FROM lotes_inventario
+    WHERE material_id = ? AND activo = 1 AND cantidad_actual > 0
+    ORDER BY
+      CASE WHEN fecha_vencimiento IS NULL THEN 1 ELSE 0 END,
+      fecha_vencimiento ASC,
+      fecha_ingreso ASC
+  `, [materialId]);
+
+  let restante = cantidadTotal;
+  const resultado: Array<{ lote_id: number; cantidad: number; codigo_lote: string }> = [];
+
+  for (const lote of lotes) {
+    if (restante <= 0) break;
+
+    const descontar = Math.min(lote.cantidad_actual, restante);
+    const nuevaCantidad = lote.cantidad_actual - descontar;
+
+    dbHelpers.run(
+      'UPDATE lotes_inventario SET cantidad_actual = ?, activo = ? WHERE id = ?',
+      [nuevaCantidad, nuevaCantidad > 0 ? 1 : 0, lote.id]
+    );
+
+    resultado.push({ lote_id: lote.id, cantidad: descontar, codigo_lote: lote.codigo_lote || `Lote #${lote.id}` });
+    restante -= descontar;
+  }
+
+  return resultado;
+}
+
+/**
  * Registra todos los handlers IPC para comunicación con el renderer
  */
 export function registerIpcHandlers(): void {
@@ -317,7 +355,7 @@ export function registerIpcHandlers(): void {
 
         // Verificar stock disponible
         const material = dbHelpers.get<any>(
-          'SELECT id, nombre, stock_actual, stock_minimo FROM materiales WHERE id = ?',
+          'SELECT id, nombre, stock_actual, stock_minimo, es_perecedero FROM materiales WHERE id = ?',
           [consumo.material_id]
         );
         if (!material) continue;
@@ -334,16 +372,45 @@ export function registerIpcHandlers(): void {
         }
 
         // Crear movimiento de salida (trigger actualiza stock_actual)
-        dbHelpers.run(
-          `INSERT INTO movimientos_inventario (material_id, proyecto_id, tipo, cantidad, motivo, responsable)
-           VALUES (?, ?, 'salida', ?, ?, 'Sistema')`,
-          [
-            consumo.material_id,
-            actividad.proyecto_id,
-            cantidadFinal,
-            `Consumo confirmado por avance (${avanceAnterior}% → ${data.nuevo_avance}%)`
-          ]
-        );
+        // Para perecederos: usar FEFO automático
+        if (material.es_perecedero) {
+          const lotesAfectados = descontarFEFO(consumo.material_id, cantidadFinal);
+          for (const lote of lotesAfectados) {
+            dbHelpers.run(
+              `INSERT INTO movimientos_inventario (material_id, proyecto_id, lote_id, tipo, cantidad, motivo, responsable, lote)
+               VALUES (?, ?, ?, 'salida', ?, ?, 'Sistema', ?)`,
+              [
+                consumo.material_id,
+                actividad.proyecto_id,
+                lote.lote_id,
+                lote.cantidad,
+                `Consumo confirmado por avance (${avanceAnterior}% → ${data.nuevo_avance}%)`,
+                lote.codigo_lote
+              ]
+            );
+          }
+          // Si quedó restante sin lote
+          const totalFEFO = lotesAfectados.reduce((s, l) => s + l.cantidad, 0);
+          if (totalFEFO < cantidadFinal) {
+            dbHelpers.run(
+              `INSERT INTO movimientos_inventario (material_id, proyecto_id, tipo, cantidad, motivo, responsable)
+               VALUES (?, ?, 'salida', ?, ?, 'Sistema')`,
+              [consumo.material_id, actividad.proyecto_id, cantidadFinal - totalFEFO,
+               `Consumo confirmado por avance (${avanceAnterior}% → ${data.nuevo_avance}%)`]
+            );
+          }
+        } else {
+          dbHelpers.run(
+            `INSERT INTO movimientos_inventario (material_id, proyecto_id, tipo, cantidad, motivo, responsable)
+             VALUES (?, ?, 'salida', ?, ?, 'Sistema')`,
+            [
+              consumo.material_id,
+              actividad.proyecto_id,
+              cantidadFinal,
+              `Consumo confirmado por avance (${avanceAnterior}% → ${data.nuevo_avance}%)`
+            ]
+          );
+        }
 
         // Actualizar cantidad_consumida
         const matAct = dbHelpers.get<any>(
@@ -456,6 +523,91 @@ export function registerIpcHandlers(): void {
   // ==================== MOVIMIENTOS ====================
   
   ipcMain.handle('db:movimientos:create', async (_, movimiento: any) => {
+    const material = dbHelpers.get<any>(
+      'SELECT id, es_perecedero FROM materiales WHERE id = ?',
+      [movimiento.material_id]
+    );
+
+    // Para materiales perecederos con salida: usar FEFO
+    if (material?.es_perecedero && movimiento.tipo === 'salida') {
+      return dbHelpers.transaction(() => {
+        const lotesAfectados = descontarFEFO(movimiento.material_id, movimiento.cantidad);
+        let firstId: any = null;
+
+        for (const lote of lotesAfectados) {
+          const result = dbHelpers.run(
+            `INSERT INTO movimientos_inventario (material_id, proyecto_id, lote_id, tipo, cantidad, motivo, responsable, lote)
+             VALUES (?, ?, ?, 'salida', ?, ?, ?, ?)`,
+            [
+              movimiento.material_id,
+              movimiento.proyecto_id,
+              lote.lote_id,
+              lote.cantidad,
+              movimiento.motivo,
+              movimiento.responsable || 'Sistema',
+              lote.codigo_lote
+            ]
+          );
+          if (!firstId) firstId = result.lastInsertRowid;
+        }
+
+        // Si no había lotes suficientes, crear movimiento sin lote por el restante
+        const totalDescontado = lotesAfectados.reduce((sum, l) => sum + l.cantidad, 0);
+        if (totalDescontado < movimiento.cantidad) {
+          const result = dbHelpers.run(
+            `INSERT INTO movimientos_inventario (material_id, proyecto_id, tipo, cantidad, motivo, responsable)
+             VALUES (?, ?, 'salida', ?, ?, ?)`,
+            [
+              movimiento.material_id,
+              movimiento.proyecto_id,
+              movimiento.cantidad - totalDescontado,
+              movimiento.motivo,
+              movimiento.responsable || 'Sistema'
+            ]
+          );
+          if (!firstId) firstId = result.lastInsertRowid;
+        }
+
+        return { id: firstId };
+      });
+    }
+
+    // Para materiales perecederos con entrada: crear lote automáticamente
+    if (material?.es_perecedero && movimiento.tipo === 'entrada') {
+      return dbHelpers.transaction(() => {
+        const loteResult = dbHelpers.run(
+          `INSERT INTO lotes_inventario (material_id, codigo_lote, cantidad_inicial, cantidad_actual, fecha_vencimiento, notas)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [
+            movimiento.material_id,
+            movimiento.lote_codigo || `LOTE-${Date.now()}`,
+            movimiento.cantidad,
+            movimiento.cantidad,
+            movimiento.fecha_vencimiento || null,
+            movimiento.notas_lote || 'Ingreso manual'
+          ]
+        );
+        const loteId = loteResult.lastInsertRowid;
+
+        const result = dbHelpers.run(
+          `INSERT INTO movimientos_inventario (material_id, proyecto_id, lote_id, tipo, cantidad, motivo, responsable, lote)
+           VALUES (?, ?, ?, 'entrada', ?, ?, ?, ?)`,
+          [
+            movimiento.material_id,
+            movimiento.proyecto_id,
+            loteId,
+            movimiento.cantidad,
+            movimiento.motivo,
+            movimiento.responsable || 'Sistema',
+            movimiento.lote_codigo || `LOTE-${Date.now()}`
+          ]
+        );
+
+        return { id: result.lastInsertRowid };
+      });
+    }
+
+    // Materiales NO perecederos: comportamiento original
     const result = dbHelpers.run(
       `INSERT INTO movimientos_inventario (material_id, proyecto_id, tipo, cantidad, motivo, responsable)
        VALUES (?, ?, ?, ?, ?, ?)`,
@@ -473,15 +625,59 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('db:movimientos:getByMaterial', async (_, materialId: number) => {
     return dbHelpers.all(
-      `SELECT m.*, p.nombre as proyecto_nombre 
+      `SELECT m.*, p.nombre as proyecto_nombre, l.codigo_lote as lote_codigo
        FROM movimientos_inventario m
        LEFT JOIN proyectos p ON m.proyecto_id = p.id
+       LEFT JOIN lotes_inventario l ON m.lote_id = l.id
        WHERE m.material_id = ?
        ORDER BY m.fecha DESC
        LIMIT 50`,
       [materialId]
     );
   });
+
+  // ==================== LOTES DE INVENTARIO ====================
+
+  ipcMain.handle('db:lotes:getByMaterial', async (_, materialId: number) => {
+    return dbHelpers.all(`
+      SELECT l.*, u.abreviatura as unidad_abrev
+      FROM lotes_inventario l
+      JOIN materiales m ON l.material_id = m.id
+      LEFT JOIN unidades_medida u ON m.unidad_medida_id = u.id
+      WHERE l.material_id = ?
+      ORDER BY
+        CASE WHEN l.fecha_vencimiento IS NULL THEN 1 ELSE 0 END,
+        l.fecha_vencimiento ASC,
+        l.fecha_ingreso ASC
+    `, [materialId]);
+  });
+
+  ipcMain.handle('db:lotes:create', async (_, lote: any) => {
+    const result = dbHelpers.run(
+      `INSERT INTO lotes_inventario (material_id, codigo_lote, cantidad_inicial, cantidad_actual, fecha_vencimiento, notas)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [lote.material_id, lote.codigo_lote, lote.cantidad_inicial, lote.cantidad_actual, lote.fecha_vencimiento || null, lote.notas || null]
+    );
+    return { id: result.lastInsertRowid };
+  });
+
+  ipcMain.handle('db:lotes:update', async (_, id: number, lote: any) => {
+    return dbHelpers.run(
+      `UPDATE lotes_inventario SET codigo_lote = ?, fecha_vencimiento = ?, notas = ? WHERE id = ?`,
+      [lote.codigo_lote, lote.fecha_vencimiento || null, lote.notas || null, id]
+    );
+  });
+
+  ipcMain.handle('db:lotes:delete', async (_, id: number) => {
+    // Solo permitir eliminar lotes vacíos
+    const lote = dbHelpers.get<any>('SELECT cantidad_actual FROM lotes_inventario WHERE id = ?', [id]);
+    if (lote && lote.cantidad_actual > 0) {
+      throw new Error('No se puede eliminar un lote con stock. Primero consuma o ajuste la cantidad.');
+    }
+    return dbHelpers.run('DELETE FROM lotes_inventario WHERE id = ?', [id]);
+  });
+
+  // ==================== ALERTAS ====================
 
   ipcMain.handle('db:alertas:generar', async (_, proyectoId: number) => {
     try {
@@ -604,10 +800,30 @@ export function registerIpcHandlers(): void {
 
       // Actualizar stock de cada material (crear movimiento de entrada)
       for (const detalle of detalles) {
+        const mat = dbHelpers.get<any>(
+          'SELECT id, es_perecedero FROM materiales WHERE id = ?',
+          [detalle.material_id]
+        );
+
+        let loteId: number | null = null;
+        let codigoLote: string | null = null;
+
+        // Para perecederos: crear lote automáticamente
+        if (mat?.es_perecedero) {
+          codigoLote = `ORD-${ordenId}-MAT-${detalle.material_id}`;
+          // fecha_vencimiento se puede dejar null aquí; el admin la configura desde el modal de lotes
+          const loteResult = dbHelpers.run(
+            `INSERT INTO lotes_inventario (material_id, codigo_lote, cantidad_inicial, cantidad_actual, fecha_vencimiento, orden_compra_id, notas)
+             VALUES (?, ?, ?, ?, NULL, ?, ?)`,
+            [detalle.material_id, codigoLote, detalle.cantidad, detalle.cantidad, ordenId, `Recepción de orden #${ordenId}`]
+          );
+          loteId = loteResult.lastInsertRowid as number;
+        }
+
         dbHelpers.run(
-          `INSERT INTO movimientos_inventario (material_id, tipo, cantidad, motivo, responsable)
-           VALUES (?, 'entrada', ?, ?, ?)`,
-          [detalle.material_id, detalle.cantidad, `Recepción de orden #${ordenId}`, 'Sistema']
+          `INSERT INTO movimientos_inventario (material_id, lote_id, tipo, cantidad, motivo, responsable, lote)
+           VALUES (?, ?, 'entrada', ?, ?, ?, ?)`,
+          [detalle.material_id, loteId, detalle.cantidad, `Recepción de orden #${ordenId}`, 'Sistema', codigoLote]
         );
 
         // Auto-resolver alertas: si el stock ahora supera el minimo, marcar alertas como atendidas

@@ -8,6 +8,7 @@ import type {
   Alerta,
   UnidadMedida,
   MovimientoInventario,
+  LoteInventario,
   OrdenCompra,
   DetalleOrdenCompra,
   ResultadoSimulacion,
@@ -193,12 +194,31 @@ export const db = {
 
   // ==================== MOVIMIENTOS ====================
   movimientos: {
-    create: async (movimiento: Partial<MovimientoInventario>): Promise<{ id: number }> => {
+    create: async (movimiento: Partial<MovimientoInventario> & { fecha_vencimiento?: string; lote_codigo?: string; notas_lote?: string }): Promise<{ id: number }> => {
       return window.electron.ipcRenderer.invoke('db:movimientos:create', movimiento);
     },
-    
+
     getByMaterial: async (materialId: number): Promise<MovimientoInventario[]> => {
       return window.electron.ipcRenderer.invoke('db:movimientos:getByMaterial', materialId);
+    }
+  },
+
+  // ==================== LOTES DE INVENTARIO ====================
+  lotes: {
+    getByMaterial: async (materialId: number): Promise<LoteInventario[]> => {
+      return window.electron.ipcRenderer.invoke('db:lotes:getByMaterial', materialId);
+    },
+
+    create: async (lote: Partial<LoteInventario>): Promise<{ id: number }> => {
+      return window.electron.ipcRenderer.invoke('db:lotes:create', lote);
+    },
+
+    update: async (id: number, lote: Partial<LoteInventario>): Promise<void> => {
+      return window.electron.ipcRenderer.invoke('db:lotes:update', id, lote);
+    },
+
+    delete: async (id: number): Promise<void> => {
+      return window.electron.ipcRenderer.invoke('db:lotes:delete', id);
     }
   },
 

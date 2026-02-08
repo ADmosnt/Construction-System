@@ -95,10 +95,28 @@ export interface UnidadMedida {
   tipo: 'volumen' | 'peso' | 'longitud' | 'area' | 'unidad';
 }
 
+export interface LoteInventario {
+  id: number;
+  material_id: number;
+  codigo_lote: string | null;
+  cantidad_inicial: number;
+  cantidad_actual: number;
+  fecha_vencimiento: string | null;
+  fecha_ingreso: string;
+  orden_compra_id: number | null;
+  notas: string | null;
+  activo: boolean;
+  created_at: string;
+  // Campos joined
+  material_nombre?: string;
+  unidad_abrev?: string;
+}
+
 export interface MovimientoInventario {
   id: number;
   material_id: number;
   proyecto_id: number | null;
+  lote_id: number | null;
   tipo: 'entrada' | 'salida' | 'ajuste';
   cantidad: number;
   motivo: string | null;
@@ -107,6 +125,7 @@ export interface MovimientoInventario {
   fecha: string;
   // Campos joined
   proyecto_nombre?: string;
+  lote_codigo?: string;
 }
 
 export interface ActividadDependencia {

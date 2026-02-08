@@ -124,12 +124,31 @@ CREATE TABLE materiales_actividad (
     UNIQUE(actividad_id, material_id)
 );
 
+-- TABLA: lotes_inventario
+-- Gestión de lotes para materiales perecederos (FEFO: First Expired, First Out)
+CREATE TABLE lotes_inventario (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    material_id INTEGER NOT NULL,
+    codigo_lote TEXT,
+    cantidad_inicial REAL NOT NULL,
+    cantidad_actual REAL NOT NULL,
+    fecha_vencimiento DATE,
+    fecha_ingreso DATE DEFAULT (DATE('now')),
+    orden_compra_id INTEGER,
+    notas TEXT,
+    activo BOOLEAN DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (material_id) REFERENCES materiales(id),
+    FOREIGN KEY (orden_compra_id) REFERENCES ordenes_compra(id)
+);
+
 -- TABLA: movimientos_inventario
 -- Registro de entradas/salidas de materiales
 CREATE TABLE movimientos_inventario (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     material_id INTEGER NOT NULL,
     proyecto_id INTEGER,
+    lote_id INTEGER,
     tipo TEXT NOT NULL CHECK(tipo IN ('entrada', 'salida', 'ajuste')),
     cantidad REAL NOT NULL,
     motivo TEXT,
@@ -137,7 +156,8 @@ CREATE TABLE movimientos_inventario (
     lote TEXT,
     fecha DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (material_id) REFERENCES materiales(id),
-    FOREIGN KEY (proyecto_id) REFERENCES proyectos(id)
+    FOREIGN KEY (proyecto_id) REFERENCES proyectos(id),
+    FOREIGN KEY (lote_id) REFERENCES lotes_inventario(id)
 );
 
 -- TABLA: alertas
@@ -214,7 +234,11 @@ CREATE INDEX idx_dependencias_precedente ON actividad_dependencias(actividad_pre
 CREATE INDEX idx_alertas_proyecto ON alertas(proyecto_id);
 CREATE INDEX idx_alertas_estado ON alertas(estado);
 CREATE INDEX idx_alertas_tipo ON alertas(tipo);
+CREATE INDEX idx_lotes_material ON lotes_inventario(material_id);
+CREATE INDEX idx_lotes_vencimiento ON lotes_inventario(fecha_vencimiento);
+CREATE INDEX idx_lotes_activo ON lotes_inventario(material_id, activo);
 CREATE INDEX idx_movimientos_material ON movimientos_inventario(material_id);
+CREATE INDEX idx_movimientos_lote ON movimientos_inventario(lote_id);
 CREATE INDEX idx_movimientos_fecha ON movimientos_inventario(fecha);
 CREATE INDEX idx_movimientos_material_fecha ON movimientos_inventario(material_id, fecha);
 CREATE INDEX idx_ordenes_proveedor ON ordenes_compra(proveedor_id);

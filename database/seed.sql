@@ -94,6 +94,29 @@ INSERT INTO actividades (proyecto_id, nombre, descripcion, orden, avance_planifi
 (1, 'Acabados exteriores', 'Fachada y pintura exterior', 11, 0, 0, '2026-04-20', '2026-04-30'),
 (1, 'Limpieza final y entrega', 'Limpieza y detalles finales', 12, 0, 0, '2026-05-01', '2026-06-06');
 
+-- Lotes de inventario para materiales perecederos
+-- Material 8 (Cemento gris): 2 lotes con fechas diferentes
+INSERT INTO lotes_inventario (material_id, codigo_lote, cantidad_inicial, cantidad_actual, fecha_vencimiento, fecha_ingreso, notas) VALUES
+(8, 'CEM-GR-2025-12', 120, 89, '2026-04-15', '2025-12-20', 'Primer lote - Cementos Caribe'),
+(8, 'CEM-GR-2026-01', 80, 80, '2026-07-10', '2026-01-15', 'Segundo lote - Cementos Caribe');
+-- Total lotes cemento gris: 89+80 = 169 (coincide con stock_actual: 200-22-9 = 169)
+
+-- Material 9 (Cemento blanco): 1 lote proximo a vencer
+INSERT INTO lotes_inventario (material_id, codigo_lote, cantidad_inicial, cantidad_actual, fecha_vencimiento, fecha_ingreso, notas) VALUES
+(9, 'CEM-BL-2025-11', 15, 15, '2026-02-25', '2025-11-10', 'Unico lote - proximo a vencer');
+
+-- Material 16 (Pintura latex blanca): 1 lote
+INSERT INTO lotes_inventario (material_id, codigo_lote, cantidad_inicial, cantidad_actual, fecha_vencimiento, fecha_ingreso, notas) VALUES
+(16, 'PINT-BL-2026-01', 25, 25, '2026-08-15', '2026-01-05', 'Pintura acrilica interior');
+
+-- Material 17 (Pintura latex color): 1 lote
+INSERT INTO lotes_inventario (material_id, codigo_lote, cantidad_inicial, cantidad_actual, fecha_vencimiento, fecha_ingreso, notas) VALUES
+(17, 'PINT-COL-2026-01', 12, 12, '2026-08-20', '2026-01-05', 'Pintura satinada colores');
+
+-- Material 20 (Mortero premezclado): 1 lote proximo a vencer
+INSERT INTO lotes_inventario (material_id, codigo_lote, cantidad_inicial, cantidad_actual, fecha_vencimiento, fecha_ingreso, notas) VALUES
+(20, 'MORT-2025-12', 55, 55, '2026-03-15', '2025-12-15', 'Mortero tipo S - vence pronto');
+
 -- Dependencias entre actividades (cadena de construccion realista)
 -- Tipo FS = Fin-a-Inicio (la mas comun: B no puede iniciar hasta que A termine)
 -- Tipo SS = Inicio-a-Inicio (B puede empezar cuando A empiece)

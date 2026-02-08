@@ -319,56 +319,66 @@ function generarAlertasStockEstancado(): number {
 function generarAlertasVencimiento(): number {
   let count = 0;
 
-  const materiales = dbHelpers.all<{
-    id: number;
-    nombre: string;
-    stock_actual: number;
+  // Consultar LOTES individuales en vez del material completo
+  // Esto permite alertas precisas por lote (ej: "Lote #001 de Cemento vence en 3 dias")
+  const lotes = dbHelpers.all<{
+    lote_id: number;
+    material_id: number;
+    material_nombre: string;
+    codigo_lote: string;
+    cantidad_actual: number;
     fecha_vencimiento: string;
     dias_aviso_vencimiento: number;
     dias_para_vencer: number;
   }>(`
     SELECT
-      m.id,
-      m.nombre,
-      m.stock_actual,
-      m.fecha_vencimiento,
+      l.id as lote_id,
+      m.id as material_id,
+      m.nombre as material_nombre,
+      l.codigo_lote,
+      l.cantidad_actual,
+      l.fecha_vencimiento,
       m.dias_aviso_vencimiento,
-      CAST(julianday(m.fecha_vencimiento) - julianday('now') AS INTEGER) as dias_para_vencer
-    FROM materiales m
+      CAST(julianday(l.fecha_vencimiento) - julianday('now') AS INTEGER) as dias_para_vencer
+    FROM lotes_inventario l
+    JOIN materiales m ON l.material_id = m.id
     WHERE m.es_perecedero = 1
-      AND m.fecha_vencimiento IS NOT NULL
-      AND m.stock_actual > 0
-      AND julianday(m.fecha_vencimiento) - julianday('now') <= m.dias_aviso_vencimiento * 2
+      AND l.fecha_vencimiento IS NOT NULL
+      AND l.cantidad_actual > 0
+      AND l.activo = 1
+      AND julianday(l.fecha_vencimiento) - julianday('now') <= m.dias_aviso_vencimiento * 2
   `);
 
-  for (const m of materiales) {
+  for (const l of lotes) {
     let nivel: string;
     let mensaje: string;
+    const loteLabel = l.codigo_lote || `Lote #${l.lote_id}`;
 
-    if (m.dias_para_vencer <= 0) {
-      // Ya vencido
+    if (l.dias_para_vencer <= 0) {
       nivel = 'critica';
-      mensaje = `MATERIAL VENCIDO: ${m.nombre} vencio hace ${Math.abs(m.dias_para_vencer)} dias. Bloquear su uso para evitar fallas estructurales. Stock afectado: ${m.stock_actual.toFixed(1)} unidades.`;
-    } else if (m.dias_para_vencer <= 7) {
+      mensaje = `LOTE VENCIDO: ${loteLabel} de ${l.material_nombre} vencio hace ${Math.abs(l.dias_para_vencer)} dias. Bloquear su uso. Stock afectado: ${l.cantidad_actual.toFixed(1)} unidades.`;
+    } else if (l.dias_para_vencer <= 7) {
       nivel = 'alta';
-      mensaje = `${m.nombre} vence en ${m.dias_para_vencer} dias (${m.fecha_vencimiento}). Priorizar su uso inmediatamente. Stock: ${m.stock_actual.toFixed(1)} unidades.`;
-    } else if (m.dias_para_vencer <= m.dias_aviso_vencimiento) {
+      mensaje = `${loteLabel} de ${l.material_nombre} vence en ${l.dias_para_vencer} dias (${l.fecha_vencimiento}). Priorizar su uso. Cantidad: ${l.cantidad_actual.toFixed(1)} unidades.`;
+    } else if (l.dias_para_vencer <= l.dias_aviso_vencimiento) {
       nivel = 'media';
-      mensaje = `${m.nombre} vence en ${m.dias_para_vencer} dias (${m.fecha_vencimiento}). Planificar su uso prioritario. Stock: ${m.stock_actual.toFixed(1)} unidades.`;
+      mensaje = `${loteLabel} de ${l.material_nombre} vence en ${l.dias_para_vencer} dias (${l.fecha_vencimiento}). Planificar uso prioritario. Cantidad: ${l.cantidad_actual.toFixed(1)} unidades.`;
     } else {
       nivel = 'baja';
-      mensaje = `Aviso preventivo: ${m.nombre} vence el ${m.fecha_vencimiento} (${m.dias_para_vencer} dias). Considerar priorizar su consumo.`;
+      mensaje = `Aviso preventivo: ${loteLabel} de ${l.material_nombre} vence el ${l.fecha_vencimiento} (${l.dias_para_vencer} dias). Cantidad: ${l.cantidad_actual.toFixed(1)} unidades.`;
     }
 
     insertarAlerta({
-      materialId: m.id,
+      materialId: l.material_id,
       tipo: 'vencimiento_material',
       nivel,
       mensaje,
       datosExtra: JSON.stringify({
-        fecha_vencimiento: m.fecha_vencimiento,
-        dias_para_vencer: m.dias_para_vencer,
-        stock_afectado: +m.stock_actual.toFixed(2)
+        lote_id: l.lote_id,
+        codigo_lote: loteLabel,
+        fecha_vencimiento: l.fecha_vencimiento,
+        dias_para_vencer: l.dias_para_vencer,
+        stock_afectado: +l.cantidad_actual.toFixed(2)
       })
     });
     count++;
