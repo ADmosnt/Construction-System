@@ -50,6 +50,9 @@ export default function ProyectoDetallePage() {
   const [dependencias, setDependencias] = useState<ActividadDependencia[]>([])
   const [bloqueos, setBloqueos] = useState<Record<number, string[]>>({})
 
+  // Info modal
+  const [showInfoModal, setShowInfoModal] = useState(false)
+
   // Simulador
   const [showSimulador, setShowSimulador] = useState(false)
   const [avanceSimulado, setAvanceSimulado] = useState(0)
@@ -767,7 +770,16 @@ export default function ProyectoDetallePage() {
         {/* Actividades */}
         <div className="bg-white rounded-lg shadow">
           <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
-            <h2 className="text-lg font-semibold">Actividades del Proyecto</h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg font-semibold">Actividades del Proyecto</h2>
+              <button
+                onClick={() => setShowInfoModal(true)}
+                className="w-7 h-7 rounded-full bg-blue-100 text-blue-700 hover:bg-blue-200 flex items-center justify-center text-sm font-bold transition-colors"
+                title="Como funcionan las actividades y el avance"
+              >
+                ?
+              </button>
+            </div>
             <Button
               size="sm"
               onClick={() => {
@@ -1517,6 +1529,169 @@ export default function ProyectoDetallePage() {
             </Button>
           </div>
         </form>
+      </Modal>
+
+      {/* Modal Informativo: Como funcionan las actividades */}
+      <Modal
+        isOpen={showInfoModal}
+        onClose={() => setShowInfoModal(false)}
+        title="Como funcionan las actividades y el avance"
+        size="xl"
+      >
+        <div className="space-y-5">
+          {/* Seccion: Avance Planificado vs Real */}
+          <div>
+            <h3 className="text-sm font-bold text-gray-800 mb-3">Avance Planificado vs Avance Real</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-8 h-3 rounded-full bg-gray-400"></div>
+                  <p className="text-sm font-bold text-gray-700">Avance Planificado (%)</p>
+                </div>
+                <p className="text-sm text-gray-600">
+                  Es el porcentaje al que la actividad <strong>deberia estar</strong> segun el cronograma del proyecto.
+                  Lo define usted al crear o editar la actividad.
+                </p>
+                <p className="text-xs text-gray-500 mt-2">
+                  Ejemplo: si estamos en la semana 3 de 4, el avance planificado podria ser 75%.
+                  Este valor sirve como referencia para comparar con la realidad.
+                </p>
+              </div>
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-8 h-3 rounded-full bg-blue-500"></div>
+                  <p className="text-sm font-bold text-blue-800">Avance Real (%)</p>
+                </div>
+                <p className="text-sm text-blue-800">
+                  Es el progreso <strong>verdadero</strong> de la actividad.
+                  Se actualiza al usar el boton <em>"Reflejar Avance"</em>, que ademas descuenta los materiales consumidos del inventario.
+                </p>
+                <p className="text-xs text-blue-700 mt-2">
+                  Ejemplo: la actividad deberia estar al 75% pero solo lleva 50%.
+                  El avance real no se puede disminuir, solo avanza.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Seccion: Comparacion visual */}
+          <div className="bg-white border border-gray-200 rounded-lg p-4">
+            <h4 className="text-sm font-bold text-gray-700 mb-3">Que significan los colores de la barra de avance real?</h4>
+            <div className="space-y-3">
+              <div className="flex items-center gap-3">
+                <div className="w-16 h-3 rounded-full bg-red-500 flex-shrink-0"></div>
+                <div>
+                  <p className="text-sm font-semibold text-red-700">Rojo: La actividad esta atrasada</p>
+                  <p className="text-xs text-gray-500">El avance real es menor que el planificado. Requiere atencion.</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="w-16 h-3 rounded-full bg-green-500 flex-shrink-0"></div>
+                <div>
+                  <p className="text-sm font-semibold text-green-700">Verde: La actividad esta al dia</p>
+                  <p className="text-xs text-gray-500">El avance real coincide con el planificado. Todo segun el plan.</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="w-16 h-3 rounded-full bg-blue-500 flex-shrink-0"></div>
+                <div>
+                  <p className="text-sm font-semibold text-blue-700">Azul: La actividad esta adelantada</p>
+                  <p className="text-xs text-gray-500">El avance real supera el planificado. Va mejor de lo esperado.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Seccion: Flujo de trabajo */}
+          <div className="bg-white border border-gray-200 rounded-lg p-4">
+            <h4 className="text-sm font-bold text-gray-700 mb-3">Flujo de trabajo de una actividad</h4>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="bg-blue-100 text-blue-800 text-xs font-bold px-3 py-1.5 rounded-lg">1. Crear actividad</span>
+              <span className="text-gray-400">&rarr;</span>
+              <span className="bg-blue-100 text-blue-800 text-xs font-bold px-3 py-1.5 rounded-lg">2. Asignar materiales</span>
+              <span className="text-gray-400">&rarr;</span>
+              <span className="bg-blue-100 text-blue-800 text-xs font-bold px-3 py-1.5 rounded-lg">3. Definir dependencias</span>
+              <span className="text-gray-400">&rarr;</span>
+              <span className="bg-blue-100 text-blue-800 text-xs font-bold px-3 py-1.5 rounded-lg">4. Reflejar avance</span>
+              <span className="text-gray-400">&rarr;</span>
+              <span className="bg-green-100 text-green-800 text-xs font-bold px-3 py-1.5 rounded-lg">5. Completada (100%)</span>
+            </div>
+            <div className="mt-3 space-y-2">
+              <p className="text-xs text-gray-600">
+                <strong>Paso 1:</strong> Defina el nombre, orden, fechas planificadas y el avance planificado esperado.
+              </p>
+              <p className="text-xs text-gray-600">
+                <strong>Paso 2:</strong> Asigne los materiales necesarios con las cantidades estimadas. El sistema alertara si el stock es insuficiente.
+              </p>
+              <p className="text-xs text-gray-600">
+                <strong>Paso 3:</strong> Opcional. Defina que actividades deben completarse antes con el boton "Deps". Si hay dependencias pendientes, la actividad se mostrara como <span className="bg-red-100 text-red-700 px-1 rounded text-xs font-bold">BLOQUEADA</span>.
+              </p>
+              <p className="text-xs text-gray-600">
+                <strong>Paso 4:</strong> Al reflejar avance, indique el nuevo porcentaje y confirme el consumo de materiales. El inventario se actualiza automaticamente.
+              </p>
+              <p className="text-xs text-gray-600">
+                <strong>Paso 5:</strong> Cuando el avance real llega al 100%, la actividad se marca como completada y desbloquea las actividades que dependian de ella.
+              </p>
+            </div>
+          </div>
+
+          {/* Seccion: Dependencias y bloqueos */}
+          <div className="bg-white border border-gray-200 rounded-lg p-4">
+            <h4 className="text-sm font-bold text-gray-700 mb-3">Dependencias y bloqueos</h4>
+            <p className="text-sm text-gray-600 mb-3">
+              Las dependencias establecen el orden logico de ejecucion de las actividades. Si una actividad depende de otra, no se puede avanzar hasta que la dependencia se cumpla.
+            </p>
+            <div className="space-y-2">
+              <div className="flex items-start gap-2">
+                <span className="bg-gray-200 text-gray-700 text-xs font-bold px-2 py-0.5 rounded flex-shrink-0 mt-0.5">FS</span>
+                <p className="text-xs text-gray-600"><strong>Fin a Inicio:</strong> La precedente debe estar al 100% para poder iniciar esta. Es el tipo mas comun (ej: no se puede pintar sin haber frizado primero).</p>
+              </div>
+              <div className="flex items-start gap-2">
+                <span className="bg-gray-200 text-gray-700 text-xs font-bold px-2 py-0.5 rounded flex-shrink-0 mt-0.5">SS</span>
+                <p className="text-xs text-gray-600"><strong>Inicio a Inicio:</strong> La precedente debe haber iniciado (avance {'>'} 0%) para poder iniciar esta. Permite trabajo en paralelo.</p>
+              </div>
+              <div className="flex items-start gap-2">
+                <span className="bg-gray-200 text-gray-700 text-xs font-bold px-2 py-0.5 rounded flex-shrink-0 mt-0.5">FF</span>
+                <p className="text-xs text-gray-600"><strong>Fin a Fin:</strong> Ambas deben terminar juntas. No genera bloqueo directo.</p>
+              </div>
+              <div className="flex items-start gap-2">
+                <span className="bg-gray-200 text-gray-700 text-xs font-bold px-2 py-0.5 rounded flex-shrink-0 mt-0.5">SF</span>
+                <p className="text-xs text-gray-600"><strong>Inicio a Fin:</strong> La precedente debe haber iniciado antes de que esta pueda terminar.</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Seccion: Niveles de criticidad en alertas */}
+          <div className="bg-white border border-gray-200 rounded-lg p-4">
+            <h4 className="text-sm font-bold text-gray-700 mb-3">Nivel de criticidad en alertas de bloqueo</h4>
+            <p className="text-sm text-gray-600 mb-3">
+              Cuando una actividad esta bloqueada, el sistema genera una alerta cuyo nivel de criticidad depende del estado de las dependencias bloqueantes:
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                <span className="text-xs font-bold text-red-700 bg-red-200 px-2 py-0.5 rounded">ALTA</span>
+                <p className="text-sm text-red-800 mt-2">
+                  Al menos una dependencia bloqueante tiene <strong>0% de avance</strong> (no ha iniciado).
+                </p>
+                <p className="text-xs text-red-600 mt-1">
+                  Ejemplo: "Pintar" bloqueada porque "Frizar" no ha iniciado (0%).
+                </p>
+              </div>
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                <span className="text-xs font-bold text-yellow-700 bg-yellow-200 px-2 py-0.5 rounded">MEDIA</span>
+                <p className="text-sm text-yellow-800 mt-2">
+                  Todas las dependencias bloqueantes <strong>ya tienen algun avance</strong> pero no se han completado.
+                </p>
+                <p className="text-xs text-yellow-600 mt-1">
+                  Ejemplo: "Pintar" bloqueada porque "Frizar" esta en 78% (ya inicio pero no termino).
+                </p>
+              </div>
+            </div>
+            <p className="text-xs text-gray-500 mt-3">
+              La logica: si la dependencia ni siquiera ha comenzado, la urgencia es mayor (ALTA) que si ya esta en progreso (MEDIA), porque al menos ya se esta trabajando en ella.
+            </p>
+          </div>
+        </div>
       </Modal>
 
       {/* Modal de Dependencias */}
