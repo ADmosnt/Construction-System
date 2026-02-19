@@ -13,11 +13,21 @@ export default function DashboardPage() {
   const [materiales, setMateriales] = useState<Material[]>([]);
   const [alertas, setAlertas] = useState<Alerta[]>([]);
   const [actividades, setActividades] = useState<Actividad[]>([]);
+  const [selectedProyectoId, setSelectedProyectoId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     loadData();
   }, []);
+
+  // Cargar actividades al cambiar de proyecto seleccionado
+  useEffect(() => {
+    if (selectedProyectoId) {
+      db.actividades.getByProyecto(selectedProyectoId).then(setActividades).catch(console.error);
+    } else {
+      setActividades([]);
+    }
+  }, [selectedProyectoId]);
 
   const loadData = async () => {
     try {
@@ -26,16 +36,15 @@ export default function DashboardPage() {
         db.materiales.getAll(),
         db.alertas.getAll()
       ]);
-      
+
       const proyectosActivos = proyectosData.filter(p => p.estado === 'activo');
       setProyectos(proyectosActivos);
       setMateriales(materialesData);
       setAlertas(alertasData);
 
-      // Cargar actividades del primer proyecto activo para la curva S
+      // Seleccionar el primer proyecto activo por defecto
       if (proyectosActivos.length > 0) {
-        const acts = await db.actividades.getByProyecto(proyectosActivos[0].id);
-        setActividades(acts);
+        setSelectedProyectoId(proyectosActivos[0].id);
       }
     } catch (error) {
       console.error('Error loading data:', error);
@@ -129,19 +138,37 @@ export default function DashboardPage() {
           {/* Curva S */}
           <div className="bg-white rounded-lg shadow">
             <div className="px-6 py-4 border-b border-gray-200">
-              <h2 className="text-lg font-semibold text-gray-900">
-                Curva S - {proyectos[0]?.nombre || 'Sin proyectos'}
-              </h2>
-              <p className="text-sm text-gray-500 mt-1">
-                Avance planificado vs avance real por actividad
-              </p>
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900">Curva S</h2>
+                  <p className="text-sm text-gray-500 mt-1">
+                    Avance planificado vs avance real por actividad
+                  </p>
+                </div>
+                {proyectos.length > 1 && (
+                  <select
+                    value={selectedProyectoId || ''}
+                    onChange={(e) => setSelectedProyectoId(Number(e.target.value))}
+                    className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 max-w-[220px]"
+                  >
+                    {proyectos.map(p => (
+                      <option key={p.id} value={p.id}>{p.nombre}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+              {selectedProyectoId && (
+                <p className="text-sm font-medium text-blue-700 mt-2">
+                  {proyectos.find(p => p.id === selectedProyectoId)?.nombre || ''}
+                </p>
+              )}
             </div>
             <div className="p-6">
               {actividades.length > 0 ? (
                 <CurvaSChart actividades={actividades} />
               ) : (
                 <div className="flex items-center justify-center h-64 text-gray-500">
-                  No hay actividades registradas
+                  {proyectos.length === 0 ? 'No hay proyectos activos' : 'No hay actividades registradas'}
                 </div>
               )}
             </div>

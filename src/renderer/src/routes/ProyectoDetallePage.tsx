@@ -308,6 +308,31 @@ export default function ProyectoDetallePage() {
     setConsumosReales(newConsumos)
   }
 
+  // Cuando cambia un consumo de material, recalcular el avance proporcionalmente
+  const handleConsumoChange = (matId: number, valor: number) => {
+    const newConsumos = { ...consumosReales, [matId]: valor }
+    setConsumosReales(newConsumos)
+
+    // Recalcular avance como promedio de ratio (consumido + consumo) / estimado
+    if (avanceActividad && avanceMateriales.length > 0) {
+      let sumaRatios = 0
+      let matsConEstimado = 0
+      avanceMateriales.forEach((mat) => {
+        if (mat.cantidad_estimada > 0) {
+          const consumoTotal = mat.cantidad_consumida + (newConsumos[mat.id] || 0)
+          const ratio = Math.min(1, consumoTotal / mat.cantidad_estimada)
+          sumaRatios += ratio
+          matsConEstimado++
+        }
+      })
+      if (matsConEstimado > 0) {
+        const avanceCalculado = Math.round((sumaRatios / matsConEstimado) * 100)
+        const clamped = Math.min(100, Math.max(avanceActividad.avance_real + 1, avanceCalculado))
+        setAvanceNuevo(clamped)
+      }
+    }
+  }
+
   const handleConfirmarAvance = async () => {
     if (!avanceActividad || avanceNuevo <= avanceActividad.avance_real) return
 
@@ -1164,7 +1189,7 @@ export default function ProyectoDetallePage() {
                                 value={consumoReal}
                                 onChange={(e) => {
                                   const val = parseFloat(e.target.value) || 0
-                                  setConsumosReales((prev) => ({ ...prev, [mat.id]: val }))
+                                  handleConsumoChange(mat.id, val)
                                 }}
                                 className={`w-24 px-2 py-1 border-2 rounded text-center text-sm font-semibold ${
                                   excedeStock
