@@ -228,8 +228,47 @@ export default function ProyectoDetallePage() {
       if (selectedActividad) {
         const mats = await db.actividades.getMateriales(selectedActividad.id)
         setMaterialesActividad(mats)
+
+        // Recalcular avance_real de la actividad basado en materiales
+        const matsConEstimado = mats.filter((m) => m.cantidad_estimada > 0)
+        if (matsConEstimado.length > 0) {
+          const sumaRatios = matsConEstimado.reduce((sum, m) => {
+            return sum + Math.min(1, m.cantidad_consumida / m.cantidad_estimada)
+          }, 0)
+          const nuevoAvance = Math.round((sumaRatios / matsConEstimado.length) * 100)
+          const avanceClamped = Math.min(100, Math.max(0, nuevoAvance))
+
+          if (avanceClamped !== selectedActividad.avance_real) {
+            await db.actividades.update(selectedActividad.id, {
+              avance_real: avanceClamped
+            })
+            await loadActividades()
+
+            // Recalcular avance del proyecto
+            const acts = await db.actividades.getByProyecto(Number(id))
+            const avancePromedio = acts.reduce((sum, act) => sum + act.avance_real, 0) / acts.length
+            await db.proyectos.update(Number(id), {
+              avance_actual: Math.round(avancePromedio * 10) / 10
+            })
+            await loadProyecto()
+
+            // Actualizar el selectedActividad con el nuevo avance
+            const actActualizada = acts.find((a) => a.id === selectedActividad.id)
+            if (actActualizada) {
+              setSelectedActividad(actActualizada)
+            }
+
+            showToast(
+              `Material actualizado. Avance recalculado: ${avanceClamped}%`,
+              'info'
+            )
+          } else {
+            showToast('Material actualizado', 'info')
+          }
+        } else {
+          showToast('Material actualizado', 'info')
+        }
       }
-      showToast('Material actualizado', 'info')
     } catch (error) {
       console.error('Error updating material:', error)
       showToast('Error al actualizar material', 'error')
@@ -1137,6 +1176,9 @@ export default function ProyectoDetallePage() {
                           Material
                         </th>
                         <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">
+                          Cant. Estimada
+                        </th>
+                        <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">
                           Stock Disp.
                         </th>
                         <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">
@@ -1163,9 +1205,14 @@ export default function ProyectoDetallePage() {
                             <td className="px-4 py-3">
                               <p className="font-medium text-gray-900">{mat.material_nombre}</p>
                               <p className="text-xs text-gray-500">
-                                Estimado total: {mat.cantidad_estimada} {mat.unidad_abrev} |
-                                Pendiente: {(mat.cantidad_estimada - mat.cantidad_consumida).toFixed(2)}
+                                Pendiente: {(mat.cantidad_estimada - mat.cantidad_consumida).toFixed(2)} {mat.unidad_abrev}
                               </p>
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              <span className="font-semibold text-gray-900">
+                                {mat.cantidad_estimada.toFixed(2)}
+                              </span>
+                              <p className="text-xs text-gray-500">{mat.unidad_abrev}</p>
                             </td>
                             <td className="px-4 py-3 text-center">
                               <span className={`font-semibold ${stockDisp <= 0 ? 'text-red-600' : 'text-gray-900'}`}>
@@ -1285,9 +1332,15 @@ export default function ProyectoDetallePage() {
       >
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <p className="text-sm text-gray-600">
-              Gestiona los materiales necesarios para esta actividad
-            </p>
+            <div>
+              <p className="text-sm text-gray-600">
+                Gestiona los materiales necesarios para esta actividad
+              </p>
+              <p className="text-xs text-gray-500 mt-1">
+                Avance real actual: <span className="font-bold text-blue-700">{selectedActividad?.avance_real || 0}%</span>
+                {' '}&mdash; Al cambiar cantidades estimadas, el avance se recalcula automaticamente.
+              </p>
+            </div>
             {!isActividadCompleta && (
               <Button
                 size="sm"
