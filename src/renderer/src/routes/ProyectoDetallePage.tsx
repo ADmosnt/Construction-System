@@ -229,6 +229,29 @@ export default function ProyectoDetallePage() {
         const mats = await db.actividades.getMateriales(selectedActividad.id)
         setMaterialesActividad(mats)
 
+        // Notificar nivel de alerta del material editado
+        const matEditado = mats.find((m) => m.id === matId)
+        if (matEditado) {
+          const mat = todosMateriales.find((m) => m.id === matEditado.material_id)
+          if (mat) {
+            const pendiente = cantidadEstimada - matEditado.cantidad_consumida
+            const stockDespues = mat.stock_actual - pendiente
+            if (stockDespues <= 0) {
+              showToast(
+                `${mat.nombre}: stock CRITICO`,
+                'error',
+                `Stock actual: ${mat.stock_actual.toFixed(2)} ${mat.unidad_abrev}. Pendiente por consumir: ${pendiente.toFixed(2)}. Faltarian ${Math.abs(stockDespues).toFixed(2)} ${mat.unidad_abrev}. Genere una orden de compra.`
+              )
+            } else if (stockDespues < mat.stock_minimo) {
+              showToast(
+                `${mat.nombre}: stock por debajo del minimo`,
+                'warning',
+                `Stock actual: ${mat.stock_actual.toFixed(2)}, minimo: ${mat.stock_minimo.toFixed(2)} ${mat.unidad_abrev}. Al consumir lo pendiente (${pendiente.toFixed(2)}) quedarian ${stockDespues.toFixed(2)}. Se recomienda generar una orden de compra.`
+              )
+            }
+          }
+        }
+
         // Recalcular avance_real de la actividad basado en materiales
         const matsConEstimado = mats.filter((m) => m.cantidad_estimada > 0)
         if (matsConEstimado.length > 0) {
